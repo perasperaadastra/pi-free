@@ -21,6 +21,7 @@ import {
 	getOpencodeShowPaid,
 	getOpenrouterShowPaid,
 } from "../config.ts";
+import { OPENCODE_API_KEY_SENTINEL_DISABLE_GO } from "../constants.ts";
 import { createLogger } from "./logger.ts";
 import {
 	getProviderRegistry,
@@ -123,9 +124,31 @@ const UNKNOWN_PAID_COST = Object.freeze({
 // =============================================================================
 
 export function setupBuiltInProviderToggles(pi: ExtensionAPI): void {
+	// When OPENCODE_API_KEY=public, override Pi's built-in opencode-go with
+	// zero models so it disappears from the model picker. This handles the
+	// case where the dynamic-built-in path didn't run (e.g. import error).
+	if (getOpencodeApiKey() === OPENCODE_API_KEY_SENTINEL_DISABLE_GO) {
+		pi.registerProvider("opencode-go", {
+			baseUrl: "https://opencode.ai/zen/go/v1",
+			apiKey: OPENCODE_API_KEY_SENTINEL_DISABLE_GO,
+			api: OPENCODE_DYNAMIC_API,
+			streamSimple: createOpenCodeStreamSimple(getOpenCodeSession()),
+			models: [],
+		});
+		_logger.info(
+			"[built-in-toggle] opencode-go: disabled because OPENCODE_API_KEY=public (registered with 0 models)",
+		);
+	}
+
 	const activeConfigs = BUILT_IN_TOGGLE_PROVIDERS.filter(
 		(config) => !getProviderRegistry().has(config.id),
-	);
+	).filter((config) => {
+		// Skip opencode-go when OPENCODE_API_KEY=public sentinel is used.
+		if (config.id === "opencode-go" && getOpencodeApiKey() === OPENCODE_API_KEY_SENTINEL_DISABLE_GO) {
+			return false;
+		}
+		return true;
+	});
 
 	if (activeConfigs.length === 0) {
 		_logger.info(

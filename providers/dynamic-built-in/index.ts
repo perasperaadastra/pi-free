@@ -60,6 +60,9 @@ import {
 	loadCachedOrFetchModels,
 } from "../../provider-helper.ts";
 import {
+	OPENCODE_API_KEY_SENTINEL_DISABLE_GO,
+} from "../../constants.ts";
+import {
 	OPENCODE_DYNAMIC_API,
 	createOpenCodeSessionTracker,
 	createOpenCodeStreamSimple,
@@ -663,6 +666,23 @@ export async function setupDynamicBuiltInProviders(
 	for (const config of DYNAMIC_PROVIDERS) {
 		const apiKey = config.getApiKey();
 		if (!apiKey) continue;
+		// OPENCODE_API_KEY=public is a sentinel meaning "no real key configured".
+		// Skip opencode-go (but keep opencode which shares the same key).
+		// We must still override Pi's built-in opencode-go with zero models,
+		// otherwise its built-in models remain visible in the picker.
+		if (apiKey === OPENCODE_API_KEY_SENTINEL_DISABLE_GO && config.providerId === "opencode-go") {
+			_logger.info(
+				`[dynamic] opencode-go: disabled because OPENCODE_API_KEY=public (registering with 0 models)`,
+			);
+			pi.registerProvider(config.providerId, {
+				baseUrl: config.baseUrl,
+				apiKey,
+				api: config.api,
+				streamSimple: createOpenCodeStreamSimple(_opencodeSession),
+				models: [],
+			});
+			continue;
+		}
 		fetchers.push(discoverAndRegister(pi, config, apiKey));
 	}
 
