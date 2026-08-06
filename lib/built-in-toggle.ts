@@ -30,11 +30,11 @@ import {
 } from "./registry.ts";
 import { wrapSessionStartHandler } from "./session-start-metrics.ts";
 import { createToggleState } from "./toggle-state.ts";
-import { fetchWithTimeout } from "./util.ts";
 import {
 	OPENCODE_DYNAMIC_API,
 	createOpenCodeSessionTracker,
 	createOpenCodeStreamSimple,
+	getOpenCodeModelBaseUrl,
 	ensureOpenCodeApiProviderRegistered,
 	isOpenCodeProvider,
 } from "../providers/opencode-session.ts";
@@ -42,10 +42,8 @@ import {
 const _logger = createLogger("built-in-toggle");
 
 // OpenCode requires per-request ids; see createOpenCodeStreamSimple().
-// Lazy-initialised because the OpenCode dynamic fetcher in
-// providers/dynamic-built-in/ usually wins the race for `opencode`,
-// leaving this fallback capture unused — no point allocating the
-// session tracker on every module import.
+// Keep the tracker lazy because Pi owns the built-in catalog and this module
+// only needs the custom stream when a filtered catalog is re-registered.
 let _opencodeSession: ReturnType<typeof createOpenCodeSessionTracker> | null =
 	null;
 function getOpenCodeSession() {
@@ -62,7 +60,6 @@ interface BuiltInToggleConfig {
 	getShowPaid: () => boolean;
 	baseUrl: string;
 	api: Api;
-	getApiKey?: () => string | undefined;
 }
 
 const BUILT_IN_TOGGLE_PROVIDERS: BuiltInToggleConfig[] = [
@@ -71,14 +68,12 @@ const BUILT_IN_TOGGLE_PROVIDERS: BuiltInToggleConfig[] = [
 		getShowPaid: getOpencodeShowPaid,
 		baseUrl: "https://opencode.ai/zen/v1",
 		api: OPENCODE_DYNAMIC_API,
-		getApiKey: getOpencodeApiKey,
 	},
 	{
 		id: "opencode-go",
 		getShowPaid: getOpencodeShowPaid,
 		baseUrl: "https://opencode.ai/zen/go/v1",
 		api: OPENCODE_DYNAMIC_API,
-		getApiKey: getOpencodeApiKey,
 	},
 	{
 		id: "openrouter",
@@ -92,32 +87,24 @@ const BUILT_IN_TOGGLE_PROVIDERS: BuiltInToggleConfig[] = [
 // State
 // =============================================================================
 
+interface CurrentModelRegistry {
+	// Kept structural because Pi exposes overloaded registerProvider signatures.
+	registerProvider: unknown;
+	getAll?: () => Model<Api>[];
+	getAvailable: () => Model<Api>[];
+	getApiKeyForProvider?: (providerId: string) => Promise<string | undefined>;
+}
+
 interface BuiltInProviderState {
 	stored: { free: ProviderModelConfig[]; all: ProviderModelConfig[] };
 	reRegister: (models: ProviderModelConfig[]) => void;
+	setModelRegistry: (registry: CurrentModelRegistry) => void;
 	toggleState: ReturnType<typeof createToggleState<ProviderModelConfig>>;
 }
 
 const providerStates = new Map<string, BuiltInProviderState>();
-let commandsRegistered = false;
-
-const ZERO_COST = Object.freeze({
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-});
-
-// OpenCode's /models endpoint does not expose real pricing. Use a tiny
-// non-zero sentinel for known non-free models so the model picker does not
-// label every OpenCode model as free. Authoritative free detection still uses
-// _freeKnown/_isFree, not the sentinel amount.
-const UNKNOWN_PAID_COST = Object.freeze({
-	input: 0.000001,
-	output: 0.000001,
-	cacheRead: 0,
-	cacheWrite: 0,
-});
+let commandsRegisteredFor: ExtensionAPI | undefined;
+let sessionStartRegisteredFor: ExtensionAPI | undefined;
 
 // =============================================================================
 // Setup
@@ -141,10 +128,15 @@ export function setupBuiltInProviderToggles(pi: ExtensionAPI): void {
 	}
 
 	const activeConfigs = BUILT_IN_TOGGLE_PROVIDERS.filter(
-		(config) => !getProviderRegistry().has(config.id),
+		(config) =>
+			!getProviderRegistry().has(config.id) || providerStates.has(config.id),
 	).filter((config) => {
 		// Skip opencode-go when OPENCODE_API_KEY=public sentinel is used.
-		if (config.id === "opencode-go" && getOpencodeApiKey() === OPENCODE_API_KEY_SENTINEL_DISABLE_GO) {
+		// (early registration above already handles this; safety net)
+		if (
+			config.id === "opencode-go" &&
+			getOpencodeApiKey() === OPENCODE_API_KEY_SENTINEL_DISABLE_GO
+		) {
 			return false;
 		}
 		return true;
@@ -152,30 +144,39 @@ export function setupBuiltInProviderToggles(pi: ExtensionAPI): void {
 
 	if (activeConfigs.length === 0) {
 		_logger.info(
-			"[built-in-toggle] OpenCode/OpenRouter already registered dynamically; skipping fallback capture",
+			"[built-in-toggle] OpenCode/OpenRouter already registered; skipping capture",
 		);
 		return;
 	}
 
-	// Register toggle commands once (available even before models load)
-	if (!commandsRegistered) {
+	// Register commands once per ExtensionAPI instance. A reload creates a new
+	// runner even though this module's state can survive, so the new runner must
+	// receive the commands again.
+	if (commandsRegisteredFor !== pi) {
 		for (const config of activeConfigs) {
 			registerToggleCommand(pi, config);
 		}
-		commandsRegistered = true;
+		commandsRegisteredFor = pi;
 	}
 
-	// Capture built-in models on session start and apply initial filter
+	// Capture built-in models on session start and apply initial filter. Avoid
+	// duplicate handlers when the entry point is invoked twice for one runner.
+	if (sessionStartRegisteredFor === pi) return;
+	sessionStartRegisteredFor = pi;
 	pi.on(
 		"session_start",
 		wrapSessionStartHandler("built-in-toggle", async (_event, ctx) => {
 			for (const config of activeConfigs) {
-				if (providerStates.has(config.id)) {
-					// Already captured — skip to avoid re-registering
+				const existing = providerStates.get(config.id);
+				if (existing) {
+					// ModelRegistry is session-scoped. Replace the registry and reapply
+					// the selected view to the new session's provider catalog.
+					existing.setModelRegistry(ctx.modelRegistry);
+					existing.toggleState.applyCurrent(existing.reRegister);
 					continue;
 				}
 
-				const state = tryCaptureProvider(pi, config, ctx);
+				const state = await tryCaptureProvider(pi, config, ctx);
 				if (!state) continue;
 
 				const applied = state.toggleState.applyCurrent(state.reRegister);
@@ -188,94 +189,36 @@ export function setupBuiltInProviderToggles(pi: ExtensionAPI): void {
 }
 
 // =============================================================================
-// On-demand model capture (called by toggle command when state is missing)
+// Model capture (called on session start or by toggle when state is missing)
 // =============================================================================
 
-function tryCaptureProvider(
+async function tryCaptureProvider(
 	pi: ExtensionAPI,
 	config: BuiltInToggleConfig,
-	ctx: any,
-): BuiltInProviderState | undefined {
-	const available = ctx.modelRegistry.getAvailable();
-	const providerModels = available.filter(
+	ctx: { modelRegistry: CurrentModelRegistry },
+): Promise<BuiltInProviderState | undefined> {
+	// Capture the complete catalog, not only getAvailable(). getAvailable() is
+	// auth-filtered and therefore hides Pi's built-in OpenCode models before a
+	// credential is configured, which made /toggle-opencode report "not loaded".
+	const catalog =
+		ctx.modelRegistry.getAll?.() ?? ctx.modelRegistry.getAvailable();
+	const providerModels = catalog.filter(
 		(m: Model<Api>) => m.provider === config.id,
 	);
 	if (providerModels.length === 0) return undefined;
 
 	const allModels = providerModels.map((m: Model<Api>) =>
-		modelToProviderConfig(m, config.id),
+		modelToProviderConfig(m),
 	);
 
 	return createProviderState(pi, config, {
 		allModels,
 		baseUrl: providerModels[0].baseUrl,
 		api: providerModels[0].api,
-		apiKey: getApiKeyEnvForProvider(config.id),
+		apiKey: await resolveApiKey(config.id, ctx.modelRegistry),
 		source: "captured",
+		modelRegistry: ctx.modelRegistry,
 	});
-}
-
-async function tryDiscoverProvider(
-	pi: ExtensionAPI,
-	config: BuiltInToggleConfig,
-	ctx: {
-		modelRegistry?: {
-			getApiKeyForProvider?: (
-				providerId: string,
-			) => Promise<string | undefined>;
-		};
-	},
-): Promise<BuiltInProviderState | undefined> {
-	const apiKey =
-		config.id === "openrouter"
-			? await ctx.modelRegistry?.getApiKeyForProvider?.(config.id)
-			: config.getApiKey?.();
-	if (!apiKey) return undefined;
-
-	try {
-		const response = await fetchWithTimeout(
-			`${config.baseUrl}/models`,
-			{
-				headers: {
-					Accept: "application/json",
-					Authorization: `Bearer ${apiKey}`,
-				},
-			},
-			30_000,
-		);
-
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status} ${response.statusText}`);
-		}
-
-		const body = (await response.json()) as
-			| Array<Record<string, unknown>>
-			| { data?: Array<Record<string, unknown>> };
-		const rawModels = Array.isArray(body) ? body : (body.data ?? []);
-		const mappedModels = rawModels
-			.map((m) => rawModelToProviderConfig(m, config))
-			.filter(
-				(m): m is ProviderModelConfig & { _pricingKnown?: boolean } =>
-					m !== undefined,
-			);
-		const allModels = applyAuthoritativeFreeFlags(mappedModels, config.id);
-
-		if (allModels.length === 0) return undefined;
-
-		return createProviderState(pi, config, {
-			allModels,
-			baseUrl: config.baseUrl,
-			api: config.api,
-			// Keep Pi-managed OpenRouter OAuth intact after discovery.
-			apiKey: config.id === "openrouter" ? undefined : apiKey,
-			source: "discovered",
-		});
-	} catch (err) {
-		_logger.warn(`[built-in-toggle] ${config.id}: on-demand discovery failed`, {
-			error: err instanceof Error ? err.message : String(err),
-		});
-		return undefined;
-	}
 }
 
 function createProviderState(
@@ -286,10 +229,12 @@ function createProviderState(
 		baseUrl: string;
 		api: Api;
 		apiKey?: string;
-		source: "captured" | "discovered";
+		source: "captured";
+		modelRegistry: CurrentModelRegistry;
 	},
 ): BuiltInProviderState {
 	const { allModels, baseUrl, api, apiKey, source } = options;
+	let currentModelRegistry = options.modelRegistry;
 	const freeModels = allModels.filter((m: ProviderModelConfig) =>
 		isFreeModel({ ...m, provider: config.id }, allModels),
 	);
@@ -300,7 +245,7 @@ function createProviderState(
 		if (isOpenCodeProvider(config.id)) {
 			ensureOpenCodeApiProviderRegistered(getOpenCodeSession());
 		}
-		pi.registerProvider(config.id, {
+		const providerConfig = {
 			baseUrl,
 			...(apiKey !== undefined ? { apiKey } : {}),
 			api: isOpenCodeProvider(config.id) ? OPENCODE_DYNAMIC_API : api,
@@ -308,7 +253,21 @@ function createProviderState(
 				? { streamSimple: createOpenCodeStreamSimple(getOpenCodeSession()) }
 				: {}),
 			models,
-		});
+		};
+
+		// Event/command contexts expose the current session registry. Using it
+		// avoids calling the stale ExtensionAPI captured before a session switch.
+		// Keep the pi fallback for the initial load and older test/runtime shims.
+		if (typeof currentModelRegistry?.registerProvider === "function") {
+			(
+				currentModelRegistry.registerProvider as (
+					providerId: string,
+					config: unknown,
+				) => void
+			).call(currentModelRegistry, config.id, providerConfig);
+		} else {
+			pi.registerProvider(config.id, providerConfig);
+		}
 	};
 
 	const stored = { free: freeModels, all: allModels };
@@ -318,7 +277,14 @@ function createProviderState(
 		initialModels: stored,
 	});
 
-	const state: BuiltInProviderState = { stored, reRegister, toggleState };
+	const state: BuiltInProviderState = {
+		stored,
+		reRegister,
+		setModelRegistry: (registry) => {
+			currentModelRegistry = registry;
+		},
+		toggleState,
+	};
 	providerStates.set(config.id, state);
 
 	registerWithGlobalToggle(config.id, stored, reRegister, true);
@@ -344,18 +310,16 @@ function registerToggleCommand(
 		handler: async (_args, ctx) => {
 			let state = providerStates.get(config.id);
 			if (!state) {
-				// Models may have loaded after session_start — try on-demand capture.
-				state = tryCaptureProvider(pi, config, ctx);
-			}
-			if (!state) {
-				// If Pi has not exposed built-in models yet, fetch the provider's
-				// /models endpoint directly so /toggle-opencode works before the
-				// first chat session has populated the model registry.
-				state = await tryDiscoverProvider(pi, config, ctx);
+				// Models may have loaded after session_start — try capture again.
+				state = await tryCaptureProvider(pi, config, ctx);
+			} else if (ctx.modelRegistry) {
+				// Commands run with the current session context; refresh the
+				// registry even when the catalog was captured in an older session.
+				state.setModelRegistry(ctx.modelRegistry);
 			}
 			if (!state) {
 				ctx.ui.notify(
-					`${config.id}: models not loaded yet and on-demand discovery failed. Check your API key, then try again.`,
+					`${config.id}: models not loaded yet. Start a session first, then try again.`,
 					"warning",
 				);
 				return;
@@ -382,14 +346,17 @@ function registerToggleCommand(
 // Helpers
 // =============================================================================
 
-function modelToProviderConfig(
-	m: Model<Api>,
-	providerId?: string,
-): ProviderModelConfig {
+function modelToProviderConfig(m: Model<Api>): ProviderModelConfig {
 	const base: ProviderModelConfig = {
 		id: m.id,
 		name: m.name,
 		api: m.api,
+		// Pi's persisted OpenCode catalog may still contain the pre-/v1
+		// Anthropic base URL. Preserve per-model routing when re-registering;
+		// otherwise the first model's URL is shared by every model.
+		baseUrl: isOpenCodeProvider(m.provider)
+			? getOpenCodeModelBaseUrl(m.api, m.baseUrl)
+			: m.baseUrl,
 		reasoning: m.reasoning,
 		input: m.input,
 		cost: m.cost,
@@ -399,60 +366,25 @@ function modelToProviderConfig(
 		compat: (m as any).compat,
 	};
 
-	// Use a custom OpenCode API wrapper so per-request headers are regenerated
-	// for every LLM call instead of being frozen at registration time.
-	if (providerId && isOpenCodeProvider(providerId)) {
-		base.api = OPENCODE_DYNAMIC_API;
-	}
-
+	// The provider-level OpenCode wrapper still regenerates headers, while the
+	// model-level API is preserved so Anthropic/Responses/Google routes remain
+	// protocol-correct.
 	return base;
 }
 
-function rawModelToProviderConfig(
-	m: Record<string, unknown>,
-	config: BuiltInToggleConfig,
-): (ProviderModelConfig & { _pricingKnown?: boolean }) | undefined {
-	const id = String(m.id ?? "").trim();
-	if (!id) return undefined;
-	const inputModalities = Array.isArray(m.input_modalities)
-		? m.input_modalities
-		: undefined;
-	const supportsImage = inputModalities?.includes("image") === true;
-	return {
-		id,
-		name: String(m.name ?? m.model ?? id),
-		api: isOpenCodeProvider(config.id) ? OPENCODE_DYNAMIC_API : config.api,
-		reasoning: Boolean(m.reasoning ?? false),
-		input: supportsImage ? ["text", "image"] : ["text"],
-		cost: ZERO_COST,
-		contextWindow:
-			((m.context_length ??
-				m.max_context_length ??
-				m.context_window) as number) ?? 128_000,
-		maxTokens: ((m.max_tokens ?? m.max_completion_tokens) as number) ?? 16_384,
-		_pricingKnown: false,
-	};
-}
-
-function applyAuthoritativeFreeFlags(
-	models: Array<ProviderModelConfig & { _pricingKnown?: boolean }>,
+async function resolveApiKey(
 	providerId: string,
-): Array<
-	ProviderModelConfig & {
-		_pricingKnown?: boolean;
-		_freeKnown?: boolean;
-		_isFree?: boolean;
+	modelRegistry: CurrentModelRegistry,
+): Promise<string | undefined> {
+	// OpenCode and OpenCode Go use the same Zen API key, but Pi persists
+	// credentials by provider id. Reuse a stored Go key for the regular
+	// OpenCode catalog so free OpenCode models remain available after login.
+	if (providerId === "opencode") {
+		const sharedKey = await modelRegistry.getApiKeyForProvider?.("opencode-go");
+		if (sharedKey) return sharedKey;
 	}
-> {
-	return models.map((model) => {
-		const isFree = isFreeModel({ ...model, provider: providerId }, models);
-		return {
-			...model,
-			cost: isFree ? ZERO_COST : UNKNOWN_PAID_COST,
-			_freeKnown: true,
-			_isFree: isFree,
-		};
-	});
+
+	return getApiKeyEnvForProvider(providerId);
 }
 
 function getApiKeyEnvForProvider(providerId: string): string | undefined {

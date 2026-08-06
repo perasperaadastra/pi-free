@@ -1,99 +1,109 @@
 # pi-free-providers
 
 <p align="center">
-  <img src="banner.png" alt="pi-free" width="100%" max-width="900">
+  <img src="banner.svg" alt="pi-free" width="100%" max-width="900">
 </p>
 
-Free and paid AI model providers for [Pi](https://pi.dev). Access **free and paid models** from multiple providers in one install.
+Free and paid AI model providers for [Pi](https://pi.dev). Access models from multiple providers in one install.
 
 ---
 
 ## What does pi-free do
 
-**pi-free is a Pi extension that unlocks free and paid AI models from multiple providers.**
+**pi-free is a Pi extension that registers additional providers and applies free/all model filters.**
 
 When you install pi-free, it:
 
-1. **Registers free-tier providers** — Kilo, Cline, LLM7, OpenModel, TokenRouter, AnyAPI, and more
-2. **Captures Pi's built-in providers** with free/paid toggles — OpenCode, OpenRouter
-3. **Fetches models dynamically** — ZenMux, CrofAI, Mistral, Groq, Cerebras, xAI, Hugging Face when API keys are configured
-4. **Filters to show only free models by default** — paid models hidden until explicitly toggled on
-5. **Provides per-provider toggle commands** — `/toggle-{provider}` switches free ↔ all immediately
-6. **Handles authentication** — OAuth flows open your browser; API keys from `~/.pi/free.json` or env vars
-7. **Adds Coding Index scores** — model names include benchmark scores (`CI: 45.2`) for quick comparison
-8. **Auto-probes and hides broken models** — expired free tiers and decommissioned models detected automatically
-
----
+1. Registers native providers such as Kilo, Cline, LLM7, FastRouter, Ollama Cloud, OpenModel, StepFun, and more.
+2. Registers Qoder through Pi's native provider surface and supports Pi's built-in OpenCode, OpenCode Go, and OpenRouter integrations.
+3. Uses Pi's native model and auth stores for all extension providers; Ollama Cloud and Qoder retain documented compatibility caches only for auxiliary behavior.
+4. Applies the global free-only filter by default, while preserving provider-specific paid/trial behavior.
+5. Provides per-provider toggle commands — `/toggle-{provider}` switches between the provider's free/basic view and its full catalog.
+6. Supports OAuth and API-key authentication where a provider offers them.
+7. Adds Coding Index scores to model names and can probe and hide unavailable models.
+8. Provides `/pi-free-health` and `/free-startup` diagnostics without exposing credentials.
 
 ## Install
+
+Install the published npm package:
+
+```bash
+pi install npm:pi-free
+```
+
+For the latest unreleased GitHub changes instead:
 
 ```bash
 pi install git:github.com/apmantza/pi-free
 ```
 
-Press `Ctrl+L` to open the model picker. Free models are shown by default.
-
----
+Press `Ctrl+L` to open the model picker. The global free-only setting is enabled by default.
 
 ## Quick Start
 
-### 1. Use free models (no setup)
+### Use free models
 
-Kilo and Cline models appear immediately. To unlock all models:
+Cline exposes a public catalog before login. Kilo requires an OAuth credential or API key for authenticated refreshes and chat:
 
-```
-/login kilo      # Kilo free OAuth
-/login cline     # Cline free OAuth
-```
-
-### 2. Toggle between free and paid
-
-```
-/toggle-kilo       # Kilo free ↔ all
-/toggle-openrouter # OpenRouter free ↔ all
-/toggle-free       # global free-only mode
-/free-providers    # show model counts
+```text
+/login cline
+/login kilo
 ```
 
-### 3. Add API keys (optional)
+Qoder supports `/login qoder` with PAT or browser OAuth, then `/toggle-qoder` switches between its basic free tier and full catalog.
 
-First run creates `~/.pi/free.json` automatically. Add keys there or use environment variables:
+### Toggle between free and paid
+
+```text
+/toggle-kilo
+/toggle-openrouter
+/toggle-free
+/free-providers
+/pi-free-health
+```
+
+### Add API keys (optional)
+
+First run creates `~/.pi/free.json`. Add extension-provider keys there or use the environment variables documented in [Provider catalog & auth](docs/providers.md). For example:
 
 ```json
 {
   "ollama_api_key": "...",
   "anyapi_api_key": "...",
-  "sambanova_api_key": "...",
-  "deepinfra_api_key": "..."
+  "openmodel_api_key": "..."
 }
 ```
-
----
 
 ## Provider Catalog
 
 | Category | Providers |
-|---|---|
-| ✅ **Free** | Kilo, Cline, OpenRouter, OpenCode, LLM7, OpenModel, TokenRouter (1 free) |
-| 🔄 **Freemium** | AnyAPI, Ollama Cloud, SambaNova |
-| 💳 **Paid** | ZenMux, CrofAI, DeepInfra, Together, Novita, Routeway, b.ai |
-| 🔧 **Dynamic** | Mistral, Groq, Cerebras, xAI, Hugging Face, FastRouter |
+| --- | --- |
+| Free/free-tier | Kilo, Cline, LLM7, OpenModel, TokenRouter, Qoder basic tier, and eligible models from other catalogs |
+| Freemium | AnyAPI, Ollama Cloud, SambaNova |
+| Paid/trial | ZenMux, CrofAI, DeepInfra trial, Novita, Routeway, OpenGateway, B.AI, StepFun, and paid catalog entries from other providers |
+| Native lifecycle | Kilo, Cline, LLM7, Ollama Cloud, AnyAPI, SambaNova, TokenRouter, OpenModel, ZenMux, CrofAI, DeepInfra, Novita, Routeway, OpenGateway, B.AI, FastRouter, StepFun |
+| Built-in | OpenCode, OpenCode Go, OpenRouter |
 
-**Full catalog and setup instructions:** [docs/providers.md](docs/providers.md)
+Provider availability, authentication, and exact API-key names are maintained in [docs/providers.md](docs/providers.md). pi-free does not publish model counts because provider catalogs change.
 
----
+### Catalog and credential storage
+
+Native providers use Pi's `~/.pi/agent/models-store.json` and `~/.pi/agent/auth.json`. Qoder's static catalog is persisted in the native model store; it retains its legacy cache only for optional stream metadata. Ollama Cloud retains `~/.pi/provider-cache.json` only for capability reuse and its compatibility refresh command. `/free-startup` also reports per-provider fetch attempts and post-start session work.
+
+### Startup packaging
+
+Pi and npm load the compiled `dist/` entry. The compiled import-inclusive benchmark improved from roughly **1.14s to 0.43s p50** (total from **1.18s to 0.47s p50**) after reducing the measured import graph from **904 to 226 modules**. These are controlled extension benchmarks, not a full Pi-host A/B result; host startup also includes Pi and its peer dependencies.
 
 ## Docs
 
 | Topic | Link |
-|---|---|
+| --- | --- |
 | Provider catalog & auth | [docs/providers.md](docs/providers.md) |
 | Slash commands | [docs/commands.md](docs/commands.md) |
 | Configuration & logging | [docs/configuration.md](docs/configuration.md) |
 | Features deep dive | [docs/features.md](docs/features.md) |
+| Compiled packaging | [docs/build-strategy.md](docs/build-strategy.md) |
 | Adding new providers | [CONTRIBUTING.md](CONTRIBUTING.md) |
-
----
 
 ## License
 

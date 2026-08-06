@@ -23,6 +23,7 @@ import {
 	PROVIDER_BAI,
 	PROVIDER_CLINE,
 	PROVIDER_FASTROUTER,
+	PROVIDER_STEPFUN,
 	PROVIDER_KILO,
 	PROVIDER_OLLAMA,
 	PROVIDER_OPENCODE,
@@ -30,13 +31,13 @@ import {
 	PROVIDER_OPENROUTER,
 	PROVIDER_QODER,
 	PROVIDER_ROUTEWAY,
+	PROVIDER_OPENGATEWAY,
 	PROVIDER_TOKENROUTER,
 	PROVIDER_ZENMUX,
 	PROVIDER_CROFAI,
 	PROVIDER_LLM7,
 	PROVIDER_DEEPINFRA,
 	PROVIDER_SAMBANOVA,
-	PROVIDER_TOGETHER,
 	PROVIDER_NOVITA,
 } from "./constants.ts";
 export {
@@ -44,6 +45,7 @@ export {
 	PROVIDER_BAI,
 	PROVIDER_CLINE,
 	PROVIDER_FASTROUTER,
+	PROVIDER_STEPFUN,
 	PROVIDER_KILO,
 	PROVIDER_OPENCODE,
 	PROVIDER_OPENROUTER,
@@ -74,10 +76,11 @@ interface PiFreeConfig {
 	llm7_api_key?: string;
 	deepinfra_api_key?: string;
 	sambanova_api_key?: string;
-	together_api_key?: string;
 	novita_api_key?: string;
 	routeway_api_key?: string;
+	opengateway_api_key?: string;
 	fastrouter_api_key?: string;
+	stepfun_api_key?: string;
 	tokenrouter_api_key?: string;
 	anyapi_api_key?: string;
 	bai_api_key?: string;
@@ -95,10 +98,11 @@ interface PiFreeConfig {
 	llm7_show_paid?: boolean;
 	deepinfra_show_paid?: boolean;
 	sambanova_show_paid?: boolean;
-	together_show_paid?: boolean;
 	novita_show_paid?: boolean;
 	routeway_show_paid?: boolean;
+	opengateway_show_paid?: boolean;
 	fastrouter_show_paid?: boolean;
+	stepfun_show_paid?: boolean;
 	tokenrouter_show_paid?: boolean;
 	anyapi_show_paid?: boolean;
 	bai_show_paid?: boolean;
@@ -116,10 +120,11 @@ const CONFIG_TEMPLATE: PiFreeConfig = {
 	llm7_api_key: "",
 	deepinfra_api_key: "",
 	sambanova_api_key: "",
-	together_api_key: "",
 	novita_api_key: "",
 	routeway_api_key: "",
+	opengateway_api_key: "",
 	fastrouter_api_key: "",
+	stepfun_api_key: "",
 	tokenrouter_api_key: "",
 	anyapi_api_key: "",
 	bai_api_key: "",
@@ -138,10 +143,11 @@ const CONFIG_TEMPLATE: PiFreeConfig = {
 	llm7_show_paid: false,
 	deepinfra_show_paid: false,
 	sambanova_show_paid: false,
-	together_show_paid: false,
 	novita_show_paid: false,
 	routeway_show_paid: false,
+	opengateway_show_paid: false,
 	fastrouter_show_paid: false,
+	stepfun_show_paid: true,
 	tokenrouter_show_paid: false,
 	anyapi_show_paid: false,
 	bai_show_paid: false,
@@ -372,16 +378,16 @@ const PROVIDER_META: readonly ProviderMeta[] = [
 		prefix: "SAMBANOVA",
 		showPaidKey: "sambanova_show_paid",
 	},
-	{
-		id: PROVIDER_TOGETHER,
-		prefix: "TOGETHER",
-		showPaidKey: "together_show_paid",
-	},
 	{ id: PROVIDER_NOVITA, prefix: "NOVITA", showPaidKey: "novita_show_paid" },
 	{
 		id: PROVIDER_ROUTEWAY,
 		prefix: "ROUTEWAY",
 		showPaidKey: "routeway_show_paid",
+	},
+	{
+		id: PROVIDER_OPENGATEWAY,
+		prefix: "OPENGATEWAY",
+		showPaidKey: "opengateway_show_paid",
 	},
 	{
 		id: PROVIDER_TOKENROUTER,
@@ -399,6 +405,11 @@ const PROVIDER_META: readonly ProviderMeta[] = [
 		id: PROVIDER_FASTROUTER,
 		prefix: "FASTROUTER",
 		showPaidKey: "fastrouter_show_paid",
+	},
+	{
+		id: PROVIDER_STEPFUN,
+		prefix: "STEPFUN",
+		showPaidKey: "stepfun_show_paid",
 	},
 	{ id: PROVIDER_OLLAMA, prefix: "OLLAMA", showPaidKey: "ollama_show_paid" },
 	{
@@ -469,16 +480,19 @@ export function getSambanovaShowPaid(): boolean {
 	);
 }
 
-export function getTogetherShowPaid(): boolean {
-	return resolveBool("TOGETHER_SHOW_PAID", loadConfigFile().together_show_paid);
-}
-
 export function getNovitaShowPaid(): boolean {
 	return resolveBool("NOVITA_SHOW_PAID", loadConfigFile().novita_show_paid);
 }
 
 export function getRoutewayShowPaid(): boolean {
 	return resolveBool("ROUTEWAY_SHOW_PAID", loadConfigFile().routeway_show_paid);
+}
+
+export function getOpengatewayShowPaid(): boolean {
+	return resolveBool(
+		"OPENGATEWAY_SHOW_PAID",
+		loadConfigFile().opengateway_show_paid,
+	);
 }
 
 export function getTokenrouterShowPaid(): boolean {
@@ -507,6 +521,13 @@ export function getFastrouterShowPaid(): boolean {
 	return resolveBool(
 		"FASTROUTER_SHOW_PAID",
 		loadConfigFile().fastrouter_show_paid,
+	);
+}
+
+export function getStepfunShowPaid(): boolean {
+	return resolveBool(
+		"STEPFUN_SHOW_PAID",
+		loadConfigFile().stepfun_show_paid ?? true,
 	);
 }
 
@@ -569,10 +590,6 @@ export function getSambanovaApiKey(): string | undefined {
 	return resolve("SAMBANOVA_API_KEY", loadConfigFile().sambanova_api_key);
 }
 
-export function getTogetherApiKey(): string | undefined {
-	return resolve("TOGETHER_AI_API_KEY", loadConfigFile().together_api_key);
-}
-
 export function getNovitaApiKey(): string | undefined {
 	return resolve("NOVITA_API_KEY", loadConfigFile().novita_api_key);
 }
@@ -581,8 +598,16 @@ export function getRoutewayApiKey(): string | undefined {
 	return resolve("ROUTEWAY_API_KEY", loadConfigFile().routeway_api_key);
 }
 
+export function getOpengatewayApiKey(): string | undefined {
+	return resolve("OPENGATEWAY_API_KEY", loadConfigFile().opengateway_api_key);
+}
+
 export function getFastrouterApiKey(): string | undefined {
 	return resolve("FASTROUTER_API_KEY", loadConfigFile().fastrouter_api_key);
+}
+
+export function getStepfunApiKey(): string | undefined {
+	return resolve("STEPFUN_API_KEY", loadConfigFile().stepfun_api_key);
 }
 
 export function getTokenrouterApiKey(): string | undefined {
@@ -611,31 +636,6 @@ export function getClineApiKey(): string | undefined {
 
 export function getOllamaApiKey(): string | undefined {
 	return resolve("OLLAMA_API_KEY", loadConfigFile().ollama_api_key);
-}
-
-/** Mistral is pi's built-in provider — key comes from env var only. */
-export function getMistralApiKey(): string | undefined {
-	return process.env.MISTRAL_API_KEY;
-}
-
-/** Groq is pi's built-in provider — key comes from env var only. */
-export function getGroqApiKey(): string | undefined {
-	return process.env.GROQ_API_KEY;
-}
-
-/** Cerebras is pi's built-in provider — key comes from env var only. */
-export function getCerebrasApiKey(): string | undefined {
-	return process.env.CEREBRAS_API_KEY;
-}
-
-/** xAI is pi's built-in provider — key comes from env var only. */
-export function getXaiApiKey(): string | undefined {
-	return process.env.XAI_API_KEY;
-}
-
-/** HuggingFace is pi's built-in provider — token comes from env var only. */
-export function getHfToken(): string | undefined {
-	return process.env.HF_TOKEN;
 }
 
 /**

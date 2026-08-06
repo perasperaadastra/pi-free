@@ -9,7 +9,7 @@ import type {
 	ToolResultMessage,
 	Usage,
 } from "@earendil-works/pi-ai/compat";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/compat";
+import { createAssistantMessageEventStream } from "../../lib/assistant-message-event-stream.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { BASE_URL_CLINE, PROVIDER_CLINE } from "../../constants.ts";
 
@@ -24,9 +24,24 @@ const DEFAULT_USAGE: Usage = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
+type ClineToolCall = {
+	id: string;
+	name: string;
+	arguments: Record<string, unknown>;
+};
+
 type ClineXmlChatMessage = {
 	role: "assistant" | "system" | "user";
 	content: string | Array<{ type: "text"; text: string }>;
+};
+
+type ClineToolDefinition = {
+	type: "function";
+	function: {
+		name: string;
+		description: string;
+		parameters: unknown;
+	};
 };
 
 type ClineXmlChunk = {
@@ -37,7 +52,16 @@ type ClineXmlChunk = {
 		total_tokens?: number;
 	};
 	choices?: Array<{
-		delta?: { content?: string | null; reasoning?: string | null };
+		delta?: {
+			content?: string | null;
+			reasoning?: string | null;
+			tool_calls?: Array<{
+				index?: number;
+				id?: string;
+				function?: { name?: string; arguments?: string };
+			}>;
+			function_call?: { name?: string; arguments?: string };
+		};
 		finish_reason?: string | null;
 		error?: { message?: string; code?: string };
 	}>;
@@ -232,7 +256,23 @@ function parseSearchReplaceBlocks(
 	diff: string,
 ): Array<{ oldText: string; newText: string }> {
 	const edits: Array<{ oldText: string; newText: string }> = [];
-	const normalized = diff.replaceAll("\r\n", "\n");
+	const lines = diff.replaceAll("\r\n", "\n").split("\n");
+	const markerIndents = lines
+		.filter((line) =>
+			/^(?:\s*)(?:------- SEARCH|=======|\+{7} REPLACE)\s*$/.test(line),
+		)
+		.map((line) => line.length - line.trimStart().length)
+		.filter((indent) => indent > 0);
+	const commonIndent =
+		markerIndents.length > 0 ? Math.min(...markerIndents) : 0;
+	const normalized = lines
+		.map((line) => {
+			const indent = line.length - line.trimStart().length;
+			return commonIndent > 0 && indent >= commonIndent
+				? line.slice(commonIndent)
+				: line;
+		})
+		.join("\n");
 	let cursor = 0;
 
 	while (cursor < normalized.length) {
@@ -633,11 +673,85 @@ function assistantMessageToText(
 		.join("\n\n");
 }
 
+function getCustomToolParameters(
+	bridge: ToolBridge,
+	tools: Tool[] | undefined,
+): unknown {
+	if (bridge.remoteName !== bridge.runtimeName) return undefined;
+	return tools?.find((tool) => tool.name === bridge.remoteName)?.parameters;
+}
+
+function buildClineToolDefinitions(
+	tools: Tool[] | undefined,
+): ClineToolDefinition[] {
+	const definitions: ClineToolDefinition[] = [];
+	const seen = new Set<string>();
+	for (const bridge of getToolBridges(tools)) {
+		if (seen.has(bridge.remoteName)) continue;
+		seen.add(bridge.remoteName);
+		const customParameters = getCustomToolParameters(bridge, tools);
+		const parameters =
+			customParameters ??
+			(bridge.remoteName === "replace_in_file"
+				? {
+						type: "object",
+						properties: {
+							path: { type: "string" },
+							diff: { type: "string" },
+						},
+						required: ["path", "diff"],
+					}
+				: {
+						type: "object",
+						properties: Object.fromEntries(
+							bridge.parameters.map((name) => [name, { type: "string" }]),
+						),
+						required: bridge.parameters,
+					});
+		definitions.push({
+			type: "function",
+			function: {
+				name: bridge.remoteName,
+				description: bridge.description ?? bridge.runtimeName,
+				parameters,
+			},
+		});
+	}
+	return definitions;
+}
+
 function schemaProperties(tool: Tool): string[] {
 	const parameters = tool.parameters as unknown as {
 		properties?: Record<string, unknown>;
 	};
 	return Object.keys(parameters.properties ?? {});
+}
+
+function unwrapDsmlArgumentWrapper(
+	args: Record<string, unknown>,
+	bridge: ToolBridge | undefined,
+): Record<string, unknown> {
+	if (!bridge) return args;
+	const wrapper = ["arguments", "input"].find(
+		(name) => name in args && !bridge.parameters.includes(name),
+	);
+	if (!wrapper) return args;
+
+	let inner = args[wrapper];
+	if (typeof inner === "string") {
+		try {
+			inner = JSON.parse(inner) as unknown;
+		} catch {
+			return args;
+		}
+	}
+	if (!inner || typeof inner !== "object" || Array.isArray(inner)) return args;
+
+	const innerArgs = inner as Record<string, unknown>;
+	const allowed = new Set(bridge.parameters);
+	return Object.keys(innerArgs).every((key) => allowed.has(key))
+		? innerArgs
+		: args;
 }
 
 function buildToolInstructions(tools: Tool[] | undefined): string {
@@ -675,8 +789,8 @@ function buildToolInstructions(tools: Tool[] | undefined): string {
 	});
 
 	return [
-		"You have access to tools. Use XML tool calls instead of OpenAI function calling.",
-		"When you need a tool, output exactly one XML tool call using one of the tool names below.",
+		"You have access to tools. Prefer a native tool call when available; XML tool calls are supported as a fallback.",
+		"When you need a tool, call exactly one available tool. If using XML, output exactly one XML tool call using one of the tool names below.",
 		"Do not wrap XML tool calls in markdown fences. Do not invent tool names.",
 		"Available tools:",
 		sections.join("\n\n"),
@@ -868,7 +982,22 @@ function extractTagContent(text: string, tag: string): string | undefined {
 	return decodeXmlEntities(text.slice(valueStart, end).trim());
 }
 
-function parseToolArguments(block: string): Record<string, unknown> {
+function parseToolArguments(
+	block: string,
+	preserveStringTags: ReadonlySet<string> = new Set(),
+): Record<string, unknown> {
+	const decodedBlock = decodeXmlEntities(block).trim();
+	if (decodedBlock.startsWith("{") && decodedBlock.endsWith("}")) {
+		try {
+			const parsed = JSON.parse(decodedBlock);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				return parsed as Record<string, unknown>;
+			}
+		} catch {
+			return { arguments: decodedBlock };
+		}
+	}
+
 	const explicitArgs = extractTagContent(block, "arguments");
 	if (explicitArgs) {
 		try {
@@ -895,15 +1024,15 @@ function parseToolArguments(block: string): Record<string, unknown> {
 		}
 		const close = `</${tag}>`;
 		const closeStart =
-			tag === "content" || tag === "diff"
+			tag === "content" || preserveStringTags.has(tag)
 				? block.lastIndexOf(close)
 				: block.indexOf(close, openEnd + 1);
 		if (closeStart === -1 || closeStart < openEnd) break;
 		const raw = decodeXmlEntities(block.slice(openEnd + 1, closeStart).trim());
-		// `content` and `diff` are explicitly string parameters (file bodies,
-		// SEARCH/REPLACE diffs). Parsing them as JSON corrupts JSON file content
-		// into "[object Object]".
-		const shouldParseJson = tag !== "content" && tag !== "diff";
+		// `content` and selected provider-specific fields are explicitly string
+		// parameters (file bodies, SEARCH/REPLACE diffs). Parsing them as JSON
+		// corrupts JSON file content into "[object Object]".
+		const shouldParseJson = tag !== "content" && !preserveStringTags.has(tag);
 		if (shouldParseJson) {
 			try {
 				args[tag] = JSON.parse(raw);
@@ -922,6 +1051,216 @@ type ParsedToolCalls = {
 	text: string;
 	toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>;
 };
+
+/**
+ * Normalize the DSML variant emitted by some Cline models:
+ *
+ *   <｜DSML｜tool-name><arg>value</arg></｜DSML｜tool-name>
+ *
+ * Only complete calls for tools available in the current Pi context are
+ * normalized. In particular, an incomplete or unknown DSML fragment remains
+ * ordinary assistant text instead of being mistaken for a tool call. The
+ * pattern is static; tool names are checked against the current Pi context
+ * after matching rather than interpolated into a regular expression.
+ */
+const DSML_TOOL_CALL_RE = /<｜DSML｜([^>\s]+)>([^]*?)<\/｜DSML｜\1>/g;
+const DSML_INVOKE_RE =
+	/<｜DSML｜invoke(?:\s+name=(?:"([^"]*)"|'([^']*)'))?[^>]*>([^]*?)<\/｜DSML｜invoke>/g;
+const DSML_WRAPPER_RE =
+	/<｜DSML｜(?:function_calls|tool_calls)>([^]*?)<\/｜DSML｜(?:function_calls|tool_calls)>/g;
+const DSML_PARAMETER_RE =
+	/<｜DSML｜parameter\s+name=(?:"([^"]*)"|'([^']*)')(?:\s+string=(?:"([^"]*)"|'([^']*)'))?[^>]*>([^]*?)<\/｜DSML｜parameter>/g;
+const DSML_MALFORMED_PARAMETER_RE =
+	/<([A-Za-z_][A-Za-z0-9_.-]*)>\s*([^]*?)<\/｜DSML｜parameter>/g;
+const DSML_NAMED_FIELD_RE =
+	/<｜DSML｜([A-Za-z_][A-Za-z0-9_.-]*)>([^]*?)<\/｜DSML｜\1>/g;
+const DSML_NAMED_PARAMETER_RE =
+	/<｜DSML｜([A-Za-z_][A-Za-z0-9_.-]*)>([^]*?)<\/｜DSML｜parameter>/g;
+
+function parseMixedDsmlParameterXml(body: string): string | undefined {
+	const parameters: string[] = [];
+	let cursor = 0;
+
+	while (cursor < body.length) {
+		while (/\s/.test(body[cursor] ?? "")) cursor++;
+		if (cursor >= body.length) break;
+
+		const rest = body.slice(cursor);
+		const dsmlOpener = rest.match(/^<｜DSML｜([A-Za-z_][A-Za-z0-9_.-]*)>/);
+		const plainOpener = dsmlOpener
+			? undefined
+			: rest.match(/^<([A-Za-z_][A-Za-z0-9_.-]*)>/);
+		const name = dsmlOpener?.[1] ?? plainOpener?.[1];
+		const openerLength = dsmlOpener?.[0].length ?? plainOpener?.[0].length;
+		if (!name || !openerLength) return undefined;
+
+		const valueStart = cursor + openerLength;
+		const closers = dsmlOpener
+			? [`</｜DSML｜parameter>`, `</｜DSML｜${name}>`]
+			: [`</${name}>`];
+		let closeStart = -1;
+		let closeLength = 0;
+		for (const closer of closers) {
+			const candidate = body.indexOf(closer, valueStart);
+			if (candidate !== -1 && (closeStart === -1 || candidate < closeStart)) {
+				closeStart = candidate;
+				closeLength = closer.length;
+			}
+		}
+		if (closeStart === -1) return undefined;
+
+		parameters.push(
+			`<${name}>${xmlEscape(decodeXmlEntities(body.slice(valueStart, closeStart).trim()))}</${name}>`,
+		);
+		cursor = closeStart + closeLength;
+	}
+
+	return parameters.length > 0 ? parameters.join("\n") : undefined;
+}
+
+function dsmlParameterXml(body: string): string | undefined {
+	const parameters: string[] = [];
+	let cursor = 0;
+	let match: RegExpExecArray | null;
+
+	DSML_PARAMETER_RE.lastIndex = 0;
+	while ((match = DSML_PARAMETER_RE.exec(body)) !== null) {
+		if (body.slice(cursor, match.index).trim()) return undefined;
+		const name = match[1] ?? match[2];
+		if (!name) return undefined;
+		const stringFlag = match[3] ?? match[4];
+		const value = decodeXmlEntities(match[5].trim());
+		const encodedValue =
+			stringFlag?.toLowerCase() === "true" ? JSON.stringify(value) : value;
+		parameters.push(`<${name}>${xmlEscape(encodedValue)}</${name}>`);
+		cursor = match.index + match[0].length;
+	}
+	if (parameters.length > 0) {
+		return body.slice(cursor).trim() ? undefined : parameters.join("\n");
+	}
+	if (!body.trim()) return "";
+
+	// DeepSeek-derived endpoints sometimes mix DSML-named fields closed by
+	// `parameter` with ordinary XML fields in one invoke, e.g. `command` plus
+	// `<timeout>600</timeout>`. Accept only a complete field sequence.
+	const mixedFields = parseMixedDsmlParameterXml(body);
+	if (mixedFields !== undefined) return mixedFields;
+
+	// Some models wrap fields in DSML tags but close every field with the
+	// generic `parameter` tag, for example:
+	// `<｜DSML｜path>file</｜DSML｜parameter>`. Convert only a fully-consumed
+	// field sequence; unknown or partial markup remains ordinary text.
+	DSML_NAMED_PARAMETER_RE.lastIndex = 0;
+	while ((match = DSML_NAMED_PARAMETER_RE.exec(body)) !== null) {
+		if (body.slice(cursor, match.index).trim()) return undefined;
+		parameters.push(
+			`<${match[1]}>${xmlEscape(decodeXmlEntities(match[2].trim()))}</${match[1]}>`,
+		);
+		cursor = match.index + match[0].length;
+	}
+	if (parameters.length > 0) {
+		return body.slice(cursor).trim() ? undefined : parameters.join("\n");
+	}
+
+	// Some models wrap fields in DSML tags instead of using the standard
+	// `parameter name=...` form, for example:
+	// `<｜DSML｜path>file</｜DSML｜path>`. Convert only a fully-consumed field
+	// sequence; unknown or partial markup remains ordinary text.
+	DSML_NAMED_FIELD_RE.lastIndex = 0;
+	while ((match = DSML_NAMED_FIELD_RE.exec(body)) !== null) {
+		if (body.slice(cursor, match.index).trim()) return undefined;
+		parameters.push(
+			`<${match[1]}>${xmlEscape(decodeXmlEntities(match[2].trim()))}</${match[1]}>`,
+		);
+		cursor = match.index + match[0].length;
+	}
+	if (parameters.length > 0) {
+		return body.slice(cursor).trim() ? undefined : parameters.join("\n");
+	}
+
+	// Some models omit the parameter opener but retain its DSML closer, for
+	// example `<path>file</｜DSML｜parameter>`. Recover this only when the
+	// field name is a valid XML-style parameter name and the whole body is
+	// consumed; unknown or partial markup remains ordinary text.
+	DSML_MALFORMED_PARAMETER_RE.lastIndex = 0;
+	while ((match = DSML_MALFORMED_PARAMETER_RE.exec(body)) !== null) {
+		if (body.slice(cursor, match.index).trim()) return undefined;
+		parameters.push(
+			`<${match[1]}>${xmlEscape(decodeXmlEntities(match[2].trim()))}</${match[1]}>`,
+		);
+		cursor = match.index + match[0].length;
+	}
+	return parameters.length > 0 && !body.slice(cursor).trim()
+		? parameters.join("\n")
+		: undefined;
+}
+
+function normalizeDsmlInvoke(
+	name: string | undefined,
+	body: string,
+	toolNames: ReadonlySet<string>,
+): string | undefined {
+	const resolvedName = name && decodeXmlEntities(name).trim();
+	if (!resolvedName || !toolNames.has(resolvedName)) return undefined;
+	const parameterXml = dsmlParameterXml(body);
+	return parameterXml === undefined
+		? undefined
+		: `<${resolvedName}>${parameterXml}</${resolvedName}>`;
+}
+
+function normalizeDsmlToolCalls(
+	text: string,
+	toolNames: ReadonlySet<string>,
+): string {
+	if (toolNames.size === 0) return text;
+
+	// DeepSeek DSML also has a wrapper/invoke dialect. Normalize only when all
+	// calls are complete and refer to exact registered names.
+	let normalized = text.replace(DSML_WRAPPER_RE, (match, body: string) => {
+		const calls: string[] = [];
+		let cursor = 0;
+		let invokeMatch: RegExpExecArray | null;
+		DSML_INVOKE_RE.lastIndex = 0;
+		while ((invokeMatch = DSML_INVOKE_RE.exec(body)) !== null) {
+			if (body.slice(cursor, invokeMatch.index).trim()) return match;
+			const call = normalizeDsmlInvoke(
+				invokeMatch[1] ?? invokeMatch[2],
+				invokeMatch[3],
+				toolNames,
+			);
+			if (!call) return match;
+			calls.push(call);
+			cursor = invokeMatch.index + invokeMatch[0].length;
+		}
+		return calls.length > 0 && !body.slice(cursor).trim()
+			? calls.join("\n\n")
+			: match;
+	});
+
+	// Accept an unwrapped invoke call as well.
+	normalized = normalized.replace(
+		DSML_INVOKE_RE,
+		(match, quotedName, alternateName, body) =>
+			normalizeDsmlInvoke(quotedName ?? alternateName, body, toolNames) ??
+			match,
+	);
+
+	// Finally normalize the direct named form. The name is deliberately looked
+	// up as-is; extension tools are plain registered Pi names, not MCP aliases.
+	normalized = normalized.replace(
+		DSML_TOOL_CALL_RE,
+		(match, name: string, body: string) =>
+			toolNames.has(name) ? `<${name}>${body}</${name}>` : match,
+	);
+
+	// Recover the observed mismatched form where a named call closes as invoke.
+	const malformedDirectCallRe = /<｜DSML｜([^>\s]+)>([^]*?)<\/｜DSML｜invoke>/g;
+	return normalized.replace(
+		malformedDirectCallRe,
+		(match, name: string, body: string) =>
+			normalizeDsmlInvoke(name, body, toolNames) ?? match,
+	);
+}
 
 /**
  * Some MiMo/Cline models emit Pi SDK `<function=name>` tool-call syntax
@@ -987,8 +1326,13 @@ function parseXmlToolCalls(
 	);
 	const toolNames = new Set(bridgeByName.keys());
 
+	const normalizedDsmlText = normalizeDsmlToolCalls(rawText, toolNames);
+
 	// Extract <function=name> Pi SDK tool calls directly (no Cline XML intermediate)
-	const fnResult = extractFunctionTagToolCalls(rawText, bridgeByRemoteName);
+	const fnResult = extractFunctionTagToolCalls(
+		normalizedDsmlText,
+		bridgeByRemoteName,
+	);
 	const textWithoutThinking = extractThinkingXml(fnResult.text).text;
 	if (toolNames.size === 0) {
 		return { text: textWithoutThinking.trim(), toolCalls: fnResult.toolCalls };
@@ -1015,7 +1359,13 @@ function parseXmlToolCalls(
 		pushTextFragment(textParts, sourceText.slice(cursor, next.index));
 		const blockEnd = closeStart === -1 ? sourceText.length : closeStart;
 		const block = sourceText.slice(next.index + next.openTag.length, blockEnd);
-		const remoteArgs = parseToolArguments(block);
+		const remoteArgs = unwrapDsmlArgumentWrapper(
+			parseToolArguments(
+				block,
+				remoteName === "replace_in_file" ? new Set(["diff"]) : undefined,
+			),
+			bridge,
+		);
 		const writeRuntimeName = getWriteRuntimeToolName(tools);
 		const heredocWrite =
 			remoteName === "execute_command" && writeRuntimeName
@@ -1198,6 +1548,7 @@ async function* parseSse(response: Response): AsyncGenerator<ClineXmlChunk> {
 type ClineXmlResponseData = {
 	rawText: string;
 	thinking: string;
+	toolCalls: ClineToolCall[];
 	finishReason: string | null | undefined;
 	usage: ClineXmlChunk["usage"] | undefined;
 };
@@ -1208,6 +1559,61 @@ function isRetryableClineReasoningStreamError(error: unknown): boolean {
 	return message.includes("stream error occurred");
 }
 
+type NativeToolCallAccumulator = {
+	id: string;
+	name: string;
+	argumentsText: string;
+};
+
+type ClineChoice = NonNullable<ClineXmlChunk["choices"]>[number];
+
+function collectNativeToolCallDeltas(
+	choice: ClineChoice,
+	nativeToolCalls: Map<number, NativeToolCallAccumulator>,
+): void {
+	const deltas = [
+		...(choice.delta?.tool_calls ?? []),
+		...(choice.delta?.function_call
+			? [{ index: 0, function: choice.delta.function_call }]
+			: []),
+	];
+	for (const [deltaIndex, delta] of deltas.entries()) {
+		const index = delta.index ?? deltaIndex;
+		const existing = nativeToolCalls.get(index) ?? {
+			id: `cline_native_${index}`,
+			name: "",
+			argumentsText: "",
+		};
+		if (delta.id) existing.id = delta.id;
+		if (delta.function?.name) existing.name += delta.function.name;
+		existing.argumentsText += delta.function?.arguments ?? "";
+		nativeToolCalls.set(index, existing);
+	}
+}
+
+function parseNativeToolCalls(
+	nativeToolCalls: Map<number, NativeToolCallAccumulator>,
+): ClineToolCall[] {
+	const toolCalls: ClineToolCall[] = [];
+	for (const call of nativeToolCalls.values()) {
+		if (!call.name) continue;
+		let arguments_: Record<string, unknown> = {};
+		try {
+			const parsed = JSON.parse(call.argumentsText || "{}");
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				arguments_ = parsed as Record<string, unknown>;
+			}
+		} catch {
+			_logger.warn("Invalid native Cline tool arguments", {
+				name: call.name,
+				preview: call.argumentsText.slice(0, 160),
+			});
+		}
+		toolCalls.push({ id: call.id, name: call.name, arguments: arguments_ });
+	}
+	return toolCalls;
+}
+
 async function readClineXmlResponse(
 	response: Response,
 ): Promise<ClineXmlResponseData> {
@@ -1215,6 +1621,10 @@ async function readClineXmlResponse(
 	let thinking = "";
 	let finishReason: string | null | undefined;
 	let usage: ClineXmlChunk["usage"] | undefined;
+	const nativeToolCalls = new Map<
+		number,
+		{ id: string; name: string; argumentsText: string }
+	>();
 
 	for await (const chunk of parseSse(response)) {
 		if (chunk.error) {
@@ -1233,9 +1643,12 @@ async function readClineXmlResponse(
 		if (choice.finish_reason) finishReason = choice.finish_reason;
 		rawText += choice.delta?.content ?? "";
 		thinking += choice.delta?.reasoning ?? "";
+
+		collectNativeToolCallDeltas(choice, nativeToolCalls);
 	}
 
-	if (!rawText.trim() && !thinking.trim()) {
+	const toolCalls = parseNativeToolCalls(nativeToolCalls);
+	if (!rawText.trim() && !thinking.trim() && toolCalls.length === 0) {
 		throw new Error("Cline returned empty response");
 	}
 
@@ -1245,6 +1658,7 @@ async function readClineXmlResponse(
 	return {
 		rawText: normalizeDecoratedXmlTags(rawText),
 		thinking: normalizeDecoratedXmlTags(thinking),
+		toolCalls,
 		finishReason,
 		usage,
 	};
@@ -1268,6 +1682,7 @@ async function fetchClineXmlResponse(
 			model: normalizeApiModelId(model.id),
 			temperature: 0,
 			messages: buildClineXmlMessages(context),
+			tools: buildClineToolDefinitions(context.tools),
 			stream: true,
 			stream_options: { include_usage: true },
 			...(includeReasoning ? { include_reasoning: true } : {}),
@@ -1455,11 +1870,28 @@ export function streamClineXml(
 					extractedThinking.text,
 					currentContext.tools,
 				);
+				const bridges = getParseToolBridges(currentContext.tools);
+				const nativeToolCalls = data.toolCalls.map((toolCall) => {
+					const bridge = bridges.find(
+						(candidate) =>
+							candidate.remoteName === toolCall.name ||
+							candidate.runtimeName === toolCall.name,
+					);
+					return {
+						name: bridge?.runtimeName ?? toolCall.name,
+						arguments:
+							bridge?.toRuntimeArgs(toolCall.arguments) ?? toolCall.arguments,
+					};
+				});
 				output = prepareClineXmlOutput(
 					parsed.text,
 					extractedThinking.thinking,
 					parsedReasoning.thinking,
-					[...parsed.toolCalls, ...parsedReasoning.toolCalls],
+					[
+						...parsed.toolCalls,
+						...parsedReasoning.toolCalls,
+						...nativeToolCalls,
+					],
 				);
 
 				// Reasoning-only response: MiMo stopped without producing visible
@@ -1527,6 +1959,7 @@ export const __test__ = {
 	extractFunctionTagToolCalls,
 	isRetryableClineReasoningStreamError,
 	normalizeDecoratedXmlTags,
+	normalizeDsmlToolCalls,
 	parseReasoningHiddenToolCalls,
 	parseReasoningToolCalls,
 	parseXmlToolCalls,

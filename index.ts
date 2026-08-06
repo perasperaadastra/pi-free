@@ -15,6 +15,7 @@ import {
 	processQuotaResponse,
 	formatQuotaStatus,
 } from "./lib/quota-monitor.ts";
+import { formatHealthReport } from "./lib/health.ts";
 import {
 	startModelCall,
 	recordModelCall,
@@ -22,6 +23,16 @@ import {
 	getTelemetryPath,
 	clearTelemetry,
 } from "./lib/telemetry.ts";
+import {
+	beginSessionStart,
+	beginStartup,
+	endPhase,
+	finalizeStartup,
+	formatStartupSummary,
+	logStartupSummary,
+	startPhase,
+	timeProvider,
+} from "./lib/startup-timing.ts";
 import {
 	applyGlobalFilter,
 	getGlobalFreeOnly,
@@ -35,10 +46,12 @@ import crofai from "./providers/crofai/crofai.ts";
 import kilo from "./providers/kilo/kilo.ts";
 import llm7 from "./providers/llm7/llm7.ts";
 import deepinfra from "./providers/deepinfra/deepinfra.ts";
+import fastrouter from "./providers/fastrouter/fastrouter.ts";
+import stepfun from "./providers/stepfun/stepfun.ts";
 import sambanova from "./providers/sambanova/sambanova.ts";
-import together from "./providers/together/together.ts";
 import novita from "./providers/novita/novita.ts";
 import routeway from "./providers/routeway/routeway.ts";
+import opengateway from "./providers/opengateway/opengateway.ts";
 import tokenRouter from "./providers/tokenrouter/tokenrouter.ts";
 import ollama from "./providers/ollama/ollama.ts";
 import zenmux from "./providers/zenmux/zenmux.ts";
@@ -64,9 +77,11 @@ const UNIQUE_PROVIDERS: ReadonlyArray<(pi: ExtensionAPI) => Promise<void>> = [
 	llm7,
 	deepinfra,
 	sambanova,
-	together,
 	novita,
+	fastrouter,
+	stepfun,
 	routeway,
+	opengateway,
 	tokenRouter,
 	anyapi,
 	bai,
@@ -137,15 +152,6 @@ function setupGlobalCommands(pi: ExtensionAPI) {
 			const lines = ["📊 Pi-Free Providers:", ""];
 			const registry = getProviderRegistry();
 
-			// Providers known to not expose pricing via API (all models show as "free")
-			// OpenRouter and OpenCode expose actual pricing
-			const noPricingApi = new Set([
-				"mistral",
-				"xai",
-				"huggingface",
-				"groq",
-				"cerebras",
-			]);
 			// Freemium providers - all models share a free tier quota
 			const freemiumProviders = new Set(["sambanova", "ollama-cloud"]);
 			// Trial credit providers - one-time credits, otherwise paid
@@ -163,11 +169,6 @@ function setupGlobalCommands(pi: ExtensionAPI) {
 				} else if (trialCreditProviders.has(id)) {
 					// Trial credit: one-time credits, otherwise paid
 					lines.push(`${indicator} ${id}: ${all} models ($5 trial credit)`);
-				} else if (noPricingApi.has(id)) {
-					// Provider doesn't expose pricing - can't determine free vs paid
-					lines.push(
-						`${indicator} ${id}: ${all} models (pricing not exposed by API)`,
-					);
 				} else if (paid === 0 && free > 0) {
 					// All models are actually free
 					lines.push(`${indicator} ${id}: ${free} free models`);
@@ -252,6 +253,24 @@ function setupGlobalCommands(pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			await clearTelemetry();
 			ctx.ui.notify("Telemetry data cleared", "info");
+		},
+	});
+
+	// /pi-free-health — Show a credential-free diagnostic report and log path
+	pi.registerCommand("pi-free-health", {
+		description:
+			"Show pi-free health, startup issues, and the diagnostic log path",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(formatHealthReport(), "info");
+		},
+	});
+
+	// /free-startup — Show the last startup timing breakdown
+	pi.registerCommand("free-startup", {
+		description:
+			"Show pi-free startup timing (total, slowest providers, cache/network, failures)",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(formatStartupSummary(), "info");
 		},
 	});
 }
@@ -401,6 +420,9 @@ function setupTelemetry(pi: ExtensionAPI) {
 // =============================================================================
 
 export default async function piFreeEntry(pi: ExtensionAPI) {
+	// Begin timing this startup run (best-effort, negligible overhead).
+	beginStartup();
+
 	const globalFreeOnly = getGlobalFreeOnly();
 	_logger.info(`[pi-free] Initializing (global free-only: ${globalFreeOnly})`);
 
@@ -411,8 +433,13 @@ export default async function piFreeEntry(pi: ExtensionAPI) {
 	// idempotent (the runtime replaces them), but pi.on() is additive with
 	// no unsubscribe API, so we skip the registration block entirely on
 	// subsequent calls.
+	startPhase("global-handlers");
 	if (!_handlersRegistered) {
 		_handlersRegistered = true;
+
+		// Start a fresh observability window before any provider session_start
+		// handlers run. The handler is synchronous and never blocks Pi.
+		pi.on("session_start", () => beginSessionStart());
 
 		// Setup global commands first
 		setupGlobalCommands(pi);
@@ -427,43 +454,37 @@ export default async function piFreeEntry(pi: ExtensionAPI) {
 			"[pi-free] Skipping global handler registration (already registered)",
 		);
 	}
+	endPhase("global-handlers");
 
-	// Load all unique providers + dynamic built-in providers CONCURRENTLY.
-	// Running the dynamic phase (e.g. FastRouter) in parallel with the static
-	// providers avoids serializing two independent network windows at startup.
-	// Each provider registers itself with the global toggle system.
-	const dynamicSetup = (async () => {
-		try {
-			const { setupDynamicBuiltInProviders } = await import(
-				"./providers/dynamic-built-in/index.ts"
-			);
-			await setupDynamicBuiltInProviders(pi);
-		} catch (err) {
-			// Dynamic providers are a best-effort enhancement — if the import
-			// or init fails (e.g. upstream API change), continue with the
-			// already-registered static providers rather than failing the whole
-			// extension load. Log full error (message + stack) to the structured
-			// log so the user can investigate, but never block startup.
-			_logger.error("[pi-free] Dynamic built-in providers failed to load", {
-				error: err instanceof Error ? err.message : String(err),
-				stack: err instanceof Error ? err.stack : undefined,
-			});
-		}
-	})();
+	// Time each provider setup individually so slow providers are visible in
+	// the startup summary. Native providers register network-free Provider
+	// objects here; Pi owns their model-store refresh lifecycle. timeProvider
+	// rethrows, so Promise.allSettled keeps its exact never-throws semantics.
+	startPhase("providers");
+	const providerSetups = UNIQUE_PROVIDERS.map((setup) => {
+		const name = (setup.name || "provider").replace(/Provider$/, "");
+		return timeProvider(name, () => setup(pi));
+	});
 
-	await Promise.allSettled([
-		...UNIQUE_PROVIDERS.map((setup) => setup(pi)),
-		dynamicSetup,
-	]);
+	await Promise.allSettled(providerSetups);
+	endPhase("providers");
 
 	// Setup toggles for pi's built-in providers (e.g., OpenCode)
+	startPhase("built-in-toggles");
 	setupBuiltInProviderToggles(pi);
+	endPhase("built-in-toggles");
 
 	// Apply initial global filter if free-only mode is enabled
+	startPhase("global-filter");
 	if (globalFreeOnly) {
 		_logger.info("[pi-free] Applying initial free-only filter");
 		applyGlobalFilter(true);
 	}
+	endPhase("global-filter");
+
+	// Finalize timing and emit the observability summary (best-effort).
+	finalizeStartup();
+	logStartupSummary();
 
 	const registry = getProviderRegistry();
 	_logger.info(`[pi-free] Loaded with ${registry.size} providers`);

@@ -25,15 +25,10 @@ import {
 	PROVIDER_ANYAPI,
 } from "../../constants.ts";
 import { createLogger } from "../../lib/logger.ts";
-import { loadProviderCache } from "../../lib/provider-cache.ts";
-import { isFreeModel, registerWithGlobalToggle } from "../../lib/registry.ts";
 import { safeEnrichModelsWithModelsDev } from "../../lib/model-metadata.ts";
 import { fetchWithRetry, mapOpenRouterModel } from "../../lib/util.ts";
-import {
-	createReRegister,
-	loadCachedOrFetchModels,
-	setupProvider,
-} from "../../provider-helper.ts";
+import { registerNativeOpenAIProvider } from "../../lib/native-provider.ts";
+import { anyapiAuth } from "./anyapi-auth.ts";
 
 const _logger = createLogger("anyapi");
 
@@ -161,6 +156,7 @@ function isTextModel(model: AnyApiModel): boolean {
 
 async function fetchAnyApiModels(
 	apiKey: string,
+	signal?: AbortSignal,
 ): Promise<AnyApiProviderModel[]> {
 	const response = await fetchWithRetry(
 		`${BASE_URL_ANYAPI}/models`,
@@ -170,6 +166,7 @@ async function fetchAnyApiModels(
 				Accept: "application/json",
 				"Content-Type": "application/json",
 			},
+			signal,
 		},
 		3,
 		1000,
@@ -205,66 +202,18 @@ async function fetchAnyApiModels(
 	) as AnyApiProviderModel[];
 }
 
-export default async function anyapiProvider(pi: ExtensionAPI) {
-	const apiKey = getAnyapiApiKey();
-	if (!apiKey) {
-		_logger.info("[anyapi] Skipping — ANYAPI_API_KEY not set.");
-		return;
-	}
-
-	const cachedModels = loadProviderCache(PROVIDER_ANYAPI) as
-		| AnyApiProviderModel[]
-		| undefined;
-	const needsMetadataMigration = cachedModels?.some(
-		(model) => model._anyapiMetadataVersion !== ANYAPI_METADATA_VERSION,
-	);
-	const allModels = await loadCachedOrFetchModels(
-		PROVIDER_ANYAPI,
-		() => fetchAnyApiModels(apiKey),
-		// Force one refresh for caches written before context metadata was added;
-		// subsequent warm startups continue using the normal one-hour cache.
-		needsMetadataMigration ? { ttlMs: -1 } : undefined,
-	);
-	if (allModels.length === 0) {
-		_logger.warn("[anyapi] No text models available");
-		return;
-	}
-
-	const freeModels = allModels.filter((model) =>
-		isFreeModel({ ...model, provider: PROVIDER_ANYAPI }, allModels),
-	);
-	const stored = { free: freeModels, all: allModels };
-
-	_logger.info(
-		`[anyapi] Registered ${allModels.length} models (${freeModels.length} free)`,
-	);
-
-	const reRegister = createReRegister(pi, {
+export default function anyapiProvider(pi: ExtensionAPI): Promise<void> {
+	registerNativeOpenAIProvider(pi, {
 		providerId: PROVIDER_ANYAPI,
+		name: "AnyAPI",
 		baseUrl: BASE_URL_ANYAPI,
-		apiKey,
+		auth: anyapiAuth,
+		getApiKey: getAnyapiApiKey,
+		getShowPaid: getAnyapiShowPaid,
+		fetchModels: (apiKey, signal) =>
+			fetchAnyApiModels(apiKey, signal),
+		tosUrl: "https://anyapi.ai/terms-of-service",
+		suppressTosWhenKey: true,
 	});
-
-	registerWithGlobalToggle(PROVIDER_ANYAPI, stored, reRegister, true);
-
-	setupProvider(
-		pi,
-		{
-			providerId: PROVIDER_ANYAPI,
-			initialShowPaid: getAnyapiShowPaid(),
-			hasKey: true,
-			tosUrl: "https://anyapi.ai/terms-of-service",
-			reRegister: (models, current) => {
-				if (current) {
-					stored.free = current.free;
-					stored.all = current.all;
-				}
-				reRegister(models);
-			},
-		},
-		stored,
-	);
-
-	const showPaid = getAnyapiShowPaid();
-	reRegister(showPaid ? stored.all : stored.free);
+	return Promise.resolve();
 }

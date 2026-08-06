@@ -65,6 +65,16 @@ export async function fetchWithTimeout(
 ): Promise<Response> {
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+	const upstreamSignal = options.signal;
+	const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+
+	if (upstreamSignal?.aborted) {
+		abortFromUpstream();
+	} else {
+		upstreamSignal?.addEventListener("abort", abortFromUpstream, {
+			once: true,
+		});
+	}
 
 	try {
 		const response = await fetch(url, {
@@ -74,6 +84,7 @@ export async function fetchWithTimeout(
 		return response;
 	} finally {
 		clearTimeout(timeoutId);
+		upstreamSignal?.removeEventListener("abort", abortFromUpstream);
 	}
 }
 
@@ -113,6 +124,7 @@ export async function fetchWithRetry(
 			return response; // Return non-ok but non-retryable responses
 		} catch (error) {
 			lastError = error;
+			if (options.signal?.aborted) throw error;
 			if (i < retries - 1) {
 				await sleep(delayMs * (i + 1));
 			}
@@ -120,6 +132,41 @@ export async function fetchWithRetry(
 	}
 
 	throw lastError;
+}
+
+/**
+ * Race a promise against a wall-clock deadline.
+ *
+ * Used to bound how long startup model-list fetches may block the extension
+ * factory. If the deadline fires first, the returned promise rejects with a
+ * timeout error so callers fall back to their stale cache (or an empty list).
+ *
+ * The underlying promise is NOT cancelled — it keeps running until its own
+ * internal timeout/abort closes the socket — but we stop waiting on it. This
+ * is intentional: a model-list fetch that outlives the deadline simply has its
+ * result discarded, and the next session_start retries. The timer is always
+ * cleared on settlement so it never holds the event loop open.
+ *
+ * A non-positive or non-finite `timeoutMs` disables the deadline (passthrough).
+ */
+export function withFetchDeadline<T>(
+	promise: Promise<T>,
+	timeoutMs: number,
+	label = "fetch",
+): Promise<T> {
+	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const deadline = new Promise<never>((_resolve, reject) => {
+		timer = setTimeout(
+			() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+			timeoutMs,
+		);
+	});
+
+	return Promise.race([promise, deadline]).finally(() => {
+		if (timer !== undefined) clearTimeout(timer);
+	}) as Promise<T>;
 }
 
 // =============================================================================
@@ -389,9 +436,7 @@ export function mapOpenRouterModel(m: {
 }): ProviderModelConfig {
 	const promptPrice = Number.parseFloat(m.pricing?.prompt ?? "0");
 	const completionPrice = Number.parseFloat(m.pricing?.completion ?? "0");
-	const cacheReadPrice = Number.parseFloat(
-		m.pricing?.input_cache_read ?? "0",
-	);
+	const cacheReadPrice = Number.parseFloat(m.pricing?.input_cache_read ?? "0");
 	const cacheWritePrice = Number.parseFloat(
 		m.pricing?.input_cache_write ?? "0",
 	);
@@ -489,6 +534,7 @@ export async function fetchOpenAICompatibleModels(
 	apiKey: string,
 	defaults: OpenAIModelDefaults = {},
 	callbacks: OpenAIModelCallbacks = {},
+	signal?: AbortSignal,
 ): Promise<PiProviderModelConfig[]> {
 	const logger = createLogger(providerId);
 	const detectReasoning = callbacks.detectReasoning ?? isLikelyReasoningModel;
@@ -504,6 +550,7 @@ export async function fetchOpenAICompatibleModels(
 					Authorization: `Bearer ${apiKey}`,
 					"Content-Type": "application/json",
 				},
+				signal,
 			},
 			3,
 			1000,

@@ -21,6 +21,13 @@ vi.mock("node:fs", () => {
 	return {
 		appendFileSync: vi.fn(),
 		chmodSync: vi.fn(),
+		// Minimal no-op append stream so the (buffered) logger can open a stream
+		// without touching the real filesystem during config tests.
+		createWriteStream: vi.fn(() => ({
+			write: vi.fn(),
+			on: vi.fn(),
+			end: vi.fn(),
+		})),
 		copyFileSync: vi.fn((src: string, dest: string) => {
 			mockData.set(dest, mockData.get(src) ?? "");
 		}),
@@ -154,6 +161,22 @@ describe("show-paid getters", () => {
 		expect(getKiloShowPaid()).toBe(false);
 	});
 
+	it("getStepfunShowPaid defaults to true for the paid-only catalog", async () => {
+		vi.stubEnv("HOME", "/tmp");
+		const { getStepfunShowPaid } = await import("../config.ts");
+		expect(getStepfunShowPaid()).toBe(true);
+	});
+
+	it("getStepfunShowPaid respects an explicit false setting", async () => {
+		vi.stubEnv("HOME", "/tmp");
+		const fs = await import("node:fs");
+		const { __mockData } = fs as any;
+		__mockData.set(configPath(), JSON.stringify({ stepfun_show_paid: false }));
+
+		const { getStepfunShowPaid } = await import("../config.ts");
+		expect(getStepfunShowPaid()).toBe(false);
+	});
+
 	it("getKiloShowPaid reads from file", async () => {
 		vi.stubEnv("HOME", "/tmp");
 		const fs = await import("node:fs");
@@ -217,6 +240,22 @@ describe("show-paid getters", () => {
 		expect(getRoutewayShowPaid()).toBe(true);
 		expect(getProviderShowPaid("routeway")).toBe(true);
 	});
+
+	it("getOpengatewayShowPaid reads from file", async () => {
+		vi.stubEnv("HOME", "/tmp");
+		const fs = await import("node:fs");
+		const { __mockData } = fs as any;
+		__mockData.set(
+			configPath(),
+			JSON.stringify({ opengateway_show_paid: true }),
+		);
+
+		const { getOpengatewayShowPaid, getProviderShowPaid } = await import(
+			"../config.ts"
+		);
+		expect(getOpengatewayShowPaid()).toBe(true);
+		expect(getProviderShowPaid("opengateway")).toBe(true);
+	});
 });
 
 // =============================================================================
@@ -269,6 +308,20 @@ describe("API key getters", () => {
 		vi.stubEnv("HOME", "/tmp");
 		const { getOpenrouterApiKey } = await import("../config.ts");
 		expect(getOpenrouterApiKey()).toBeUndefined();
+	});
+
+	it("getOpengatewayApiKey prefers the environment", async () => {
+		vi.stubEnv("OPENGATEWAY_API_KEY", "env-key");
+		vi.stubEnv("HOME", "/tmp");
+		const fs = await import("node:fs");
+		const { __mockData } = fs as any;
+		__mockData.set(
+			configPath(),
+			JSON.stringify({ opengateway_api_key: "file-key" }),
+		);
+
+		const { getOpengatewayApiKey } = await import("../config.ts");
+		expect(getOpengatewayApiKey()).toBe("env-key");
 	});
 });
 
@@ -411,11 +464,6 @@ describe("config re-exports", () => {
 			"getOpenrouterShowPaid",
 			"getOpencodeShowPaid",
 			"getProviderShowPaid",
-			"getMistralApiKey",
-			"getGroqApiKey",
-			"getCerebrasApiKey",
-			"getXaiApiKey",
-			"getHfToken",
 			"getZenmuxApiKey",
 			"getCrofaiApiKey",
 			"getOllamaApiKey",

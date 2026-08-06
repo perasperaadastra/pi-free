@@ -38,13 +38,9 @@ import {
 	getProxyModelCompat,
 	isLikelyReasoningModel,
 } from "../../lib/provider-compat.ts";
-import { isFreeModel, registerWithGlobalToggle } from "../../lib/registry.ts";
+import { registerNativeOpenAIProvider } from "../../lib/native-provider.ts";
 import { cleanModelName, fetchWithRetry } from "../../lib/util.ts";
-import {
-	createReRegister,
-	loadCachedOrFetchModels,
-	setupProvider,
-} from "../../provider-helper.ts";
+import { baiAuth } from "./bai-auth.ts";
 
 const _logger = createLogger("bai");
 
@@ -127,7 +123,10 @@ function mapBaiModel(model: BaiModel): ProviderModelConfig & {
 // Fetch Models
 // =============================================================================
 
-async function fetchBaiModels(apiKey: string): Promise<ProviderModelConfig[]> {
+async function fetchBaiModels(
+	apiKey: string,
+	signal?: AbortSignal,
+): Promise<ProviderModelConfig[]> {
 	_logger.info("[bai] Fetching models from B.AI API...");
 
 	try {
@@ -139,6 +138,7 @@ async function fetchBaiModels(apiKey: string): Promise<ProviderModelConfig[]> {
 					Accept: "application/json",
 					"Content-Type": "application/json",
 				},
+				signal,
 			},
 			3,
 			1000,
@@ -167,72 +167,19 @@ async function fetchBaiModels(apiKey: string): Promise<ProviderModelConfig[]> {
 }
 
 // =============================================================================
-// Extension Entry Point
+// Native Provider Entry Point
 // =============================================================================
 
-export default async function baiProvider(pi: ExtensionAPI) {
-	const apiKey = getBaiApiKey();
-
-	if (!apiKey) {
-		_logger.info(
-			"[bai] Skipping — BAI_API_KEY not set. Sign up at https://b.ai/",
-		);
-		return;
-	}
-
-	const allModels = await loadCachedOrFetchModels(PROVIDER_BAI, () =>
-		fetchBaiModels(apiKey),
-	);
-
-	if (allModels.length === 0) {
-		// Either the API failed (already logged inside fetchBaiModels) or
-		// the API returned zero text chat models. We can't tell the user
-		// which, but we can give a hint to check the log / their key.
-		_logger.warn(
-			"[bai] No text chat models available — verify BAI_API_KEY is valid and see ~/.pi/free.log for details",
-		);
-		return;
-	}
-
-	// Use isFreeModel with allModels for proper detection
-	// B.AI doesn't expose pricing, so Route B (name-based) applies:
-	// FREE if name contains "free" OR _isFree is true (known-free hardcoded).
-	const freeModels = allModels.filter((m) =>
-		isFreeModel({ ...m, provider: PROVIDER_BAI }, allModels),
-	);
-	const stored = { free: freeModels, all: allModels };
-
-	_logger.info(
-		`[bai] Registered ${allModels.length} models (${freeModels.length} free)`,
-	);
-
-	const reRegister = createReRegister(pi, {
+export default function baiProvider(pi: ExtensionAPI): Promise<void> {
+	registerNativeOpenAIProvider(pi, {
 		providerId: PROVIDER_BAI,
+		name: "B.AI",
 		baseUrl: BASE_URL_BAI,
-		apiKey,
+		auth: baiAuth,
+		getApiKey: getBaiApiKey,
+		getShowPaid: getBaiShowPaid,
+		fetchModels: (apiKey, signal) => fetchBaiModels(apiKey, signal),
+		tosUrl: "https://b.ai/",
 	});
-
-	registerWithGlobalToggle(PROVIDER_BAI, stored, reRegister, true);
-
-	setupProvider(
-		pi,
-		{
-			providerId: PROVIDER_BAI,
-			initialShowPaid: getBaiShowPaid(),
-			tosUrl: "https://b.ai/",
-			reRegister: (models, _stored) => {
-				if (_stored) {
-					stored.free = _stored.free;
-					stored.all = _stored.all;
-				}
-				reRegister(models);
-			},
-		},
-		stored,
-	);
-
-	const showPaid = getBaiShowPaid();
-	const initialModels =
-		showPaid && stored.all.length > 0 ? stored.all : freeModels;
-	reRegister(initialModels);
+	return Promise.resolve();
 }

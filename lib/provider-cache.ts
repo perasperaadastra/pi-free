@@ -12,6 +12,7 @@
 import { createJSONStore } from "./json-persistence.ts";
 import { createLogger } from "./logger.ts";
 import { resolveSafeDataFile } from "./paths.ts";
+import { recordCacheHit } from "./startup-timing.ts";
 import type { ProviderModelConfig } from "./types.ts";
 
 const _logger = createLogger("provider-cache");
@@ -79,6 +80,10 @@ export function loadProviderCache(
 		count: cached.models.length,
 		fetchedAt: cached.fetchedAt,
 	});
+
+	// Best-effort startup observability: record that a cache entry was available
+	// to the caller. The caller may still attempt a network refresh when stale.
+	recordCacheHit(providerId);
 
 	// Cached data is loaded from disk on each call. Callers must treat the
 	// returned list as read-only; save paths clone before persistence.

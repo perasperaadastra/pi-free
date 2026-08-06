@@ -23,6 +23,7 @@
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { updateConfig } from "../config.ts";
 import { createLogger } from "./logger.ts";
+import { fetchWithTimeout } from "./util.ts";
 import {
 	areAllModelsFresh,
 	getModelsDueForProbe,
@@ -76,17 +77,56 @@ export interface ProviderProbe {
 
 	/**
 	 * Convenience: wire lazy async auto-probe into session_start.
-	 * Returns a fire-and-forget session_start handler that schedules one probe.
+	 * Returns a handler whose promise represents the probe; callers that must
+	 * keep session_start non-blocking should pass it through the detached
+	 * session-start metrics wrapper.
 	 */
 	autoProbeHandler: (
 		apiKey: string,
 		models: ProviderModelConfig[],
-	) => () => void;
+		onBroken?: (brokenIds: string[]) => void,
+	) => () => void | Promise<void>;
 }
 
 // =============================================================================
 // Factory
 // =============================================================================
+
+/** Build the standard one-token probe used by OpenAI-compatible gateways. */
+export function createOpenAIAvailabilityProbe(
+	providerId: string,
+	baseUrl: string,
+): ProviderProbe {
+	return createProviderProbe({
+		providerId,
+		probeModel: async (apiKey, modelId) => {
+			try {
+				const response = await fetchWithTimeout(
+					`${baseUrl}/chat/completions`,
+					{
+						method: "POST",
+						headers: {
+							Authorization: `Bearer ${apiKey}`,
+							"Content-Type": "application/json",
+							"User-Agent": "pi-free-providers",
+						},
+						body: JSON.stringify({
+							model: modelId,
+							messages: [{ role: "user", content: "hi" }],
+							max_tokens: 1,
+						}),
+					},
+					10_000,
+				);
+				return response.status === 404 || response.status >= 500
+					? "broken"
+					: "ok";
+			} catch {
+				return "unknown";
+			}
+		},
+	});
+}
 
 export function createProviderProbe(
 	options: ProviderProbeOptions,
@@ -171,6 +211,7 @@ export function createProviderProbe(
 	const autoProbeHandler: ProviderProbe["autoProbeHandler"] = (
 		apiKey,
 		models,
+		onBroken,
 	) => {
 		let done = false;
 		return () => {
@@ -191,11 +232,14 @@ export function createProviderProbe(
 			}
 
 			_logger.info(`[probe] Starting lazy auto-probe for ${providerId}...`);
-			run(apiKey, models, { useCache: true }).catch((err) => {
-				_logger.warn(`[probe] ${providerId}: auto-probe failed`, {
-					error: err instanceof Error ? err.message : String(err),
+			return run(apiKey, models, { useCache: true, onBroken })
+				.then(() => undefined)
+				.catch((err) => {
+					_logger.warn(`[probe] ${providerId}: auto-probe failed`, {
+						error: err instanceof Error ? err.message : String(err),
+					});
+					throw err;
 				});
-			});
 		};
 	};
 

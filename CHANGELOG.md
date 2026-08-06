@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.4] - 2026-08-05
+
+### Fixed
+
+- **OpenCode v1 API endpoint normalization** — Persisted OpenCode and OpenCode Go catalogs now normalize every model to OpenCode's current `/v1` gateway paths on re-registration, so stale Anthropic URLs like `/zen/messages` stop resolving to the website's HTML 404 page. Per-model base URLs are preserved when built-in provider toggles re-register models ([#415](https://github.com/apmantza/pi-free/pull/415)).
+
+### Changed
+
+- **Quiet automatic provider notices** — Routine free-model terms notices are now recorded through pi-free's structured logger instead of being sent to Pi's terminal UI; explicit command results and authentication prompts remain visible.
+
+## [2.4.3] - 2026-08-04
+
+### Fixed
+
+- **Cline custom API registration** — Register the `cline-xml-tools` compatibility API so Pi's default agent stream path reaches the existing XML bridge instead of failing with `No API provider registered for api: cline-xml-tools` ([#409](https://github.com/apmantza/pi-free/issues/409), [#410](https://github.com/apmantza/pi-free/pull/410)).
+
+## [2.4.2] - 2026-08-03
+
+### Fixed
+
+- **Pi extension-loader compatibility** — Native provider API factories now import through Pi's allowlisted `@earendil-works/pi-ai/compat` entrypoint instead of inaccessible `pi-ai/api/*` subpaths. This fixes extension startup failures on Pi 0.83.x where no pi-free providers registered (#397, #398, #399).
+
+### Changed
+
+- **Loader-boundary CI validation** — Added compiled-runtime import-policy checks and Pi loader smoke tests so unsupported extension imports fail before release.
+
+## [2.4.1] - 2026-08-02
+
+### Fixed
+
+- **OpenCode built-in model toggles** — Free OpenCode models are now captured from Pi's full catalog, re-registered through the current session registry, and made available when the shared credential is stored under `opencode-go` (#393, #395).
+
+## [2.4.0] - 2026-08-02
+
+### Added
+
+- **StepFun native provider** — Added the paid StepFun Step Plan provider using Pi's native model store and refresh lifecycle. Chat requests use the OpenAI-compatible endpoint at `https://api.stepfun.ai/step_plan/v1/chat/completions`; `STEPFUN_API_KEY` and `stepfun_api_key` are supported, and paid models are shown by default.
+
+### Changed
+
+- **Qoder native lifecycle** — Migrated Qoder to Pi's native Provider/ProviderAuth and models-store lifecycle while preserving its OAuth/PAT exchange, COSY signing, static catalog, custom stream, and basic/all filtering. Its legacy cache is now limited to optional stream metadata.
+- **Bounded non-blocking logs** — Added asynchronous size-based rotation for `free.log` (10 MiB default, three backups) without synchronous rotation or startup blocking; `PI_FREE_LOG_MAX_BYTES` controls the threshold.
+- **Compiled startup graph** — Removed startup-only Pi credential inspection and deferred the broad pi-ai compatibility graph. Controlled compiled import-inclusive benchmarks improved from roughly **1.14s to 0.43s p50**, total from **1.18s to 0.47s p50**, and the measured import graph from **904 to 226 modules**. These figures measure the extension benchmark, not a full Pi-host A/B result.
+
+- **Cline native tool-call compatibility** — The custom Cline bridge now advertises the current OpenAI-compatible tool schema and parses streamed `delta.tool_calls` alongside the existing XML and `<function=...>` fallbacks. This prevents reasoning-capable models from stopping after planning text when their actual tool call arrives in the native stream format.
+- **Telemetry latency uses a monotonic clock** — `startModelCall`/`recordModelCall` now measure elapsed latency with `performance.now()` instead of `Date.now()`, matching the startup-timing module. Wall-clock skew from NTP adjustments or system suspend can no longer corrupt recorded per-call latency; `Date.now()` is retained only for the stored entry timestamp. The 10-minute implausible-latency guard remains as a sanity backstop.
+- **Telemetry disk writes are debounced** — `recordModelCall` no longer performs one synchronous `writeFileSync` of the whole telemetry store on every `turn_end`. The JSON store (`lib/json-persistence.ts`) gained an optional `debounceMs` (telemetry uses 1500ms) that updates the in-memory cache immediately — so `/free-telemetry` always shows current data — while coalescing the disk flush into a single write once the burst settles. `clearTelemetry` flushes immediately so the explicit `/clear-free-telemetry` action is durable. Removes the per-turn event-loop block from chatty sessions; probe-cache and config keep synchronous writes.
+- **Benchmark debug logging routed through the structured logger** — Coding Index match diagnostics (`PI_FREE_BENCHMARK_DEBUG=1`) now flow through `createLogger("benchmark-lookup")` to `~/.pi/free.log` via the buffered async stream, instead of a parallel `appendFileSync`-based pipe-delimited `~/.pi/modelmatch.log`. Eliminates the per-model synchronous file writes when debug logging is enabled and consolidates diagnostics into the single extension log. The unused `getMatchingStats`/`getMatchLogPath`/`clearMatchLog` helpers were removed.
+- **Compiled startup entry** — npm and Pi now load the generated `dist/index.js` entry, with peer dependencies externalized and build-time packaging checks covering Git installs and tarballs.
+
+## [2.3.0] - 2026-08-01
+
+### Added
+
+- **Startup observability** — New `lib/startup-timing.ts` times the phases of `piFreeEntry` and each provider's setup duration (monotonic `performance.now()`, best-effort, negligible overhead). A structured summary (total entry time, per-provider timings slowest-first, cache-vs-network counts, failures) is logged once at the end of startup and surfaced via the new `/free-startup` command.
+- **Session-start observability** — `/free-startup` now includes monotonic session-start handler timings and intentionally detached work that completes after startup finalization, without turning background refreshes or probes into blocking handlers. A synchronous session-start window keeps repeated Pi sessions from accumulating stale metrics.
+- **Health diagnostics** — Added `/pi-free-health`, a credential-free report showing provider registration status, startup/session failures, network failures, and the configured `free.log` path for troubleshooting.
+- **Startup benchmark script** — `scripts/bench-startup.ts` times the `piFreeEntry` factory (the exact work Pi awaits) under warm-cache, cold-cache, and network-degraded conditions in a sandboxed `HOME` with a mocked `fetch`, so startup regressions can be measured rather than guessed. Run with `npx tsx scripts/bench-startup.ts <warm|cold|fastcold>`.
+- **Startup bench: native offline-init metric** — `scripts/bench-startup.ts` now understands the native `registerProvider(provider)` object form and, after timing the factory, seeds an in-memory models store (Pi's real one lives at `~/.pi/agent/models-store.json`) and drives Kilo's `refreshModels(allowNetwork:false)` to prove offline init populates the catalog with zero network. The `RESULT` line gains `kiloFactoryNetworkCalls`, `kiloOfflineInitMs`, and `kiloOfflineModels`.
+- **Startup bench: Cline offline-init metric** — `scripts/bench-startup.ts` now seeds and exercises Cline's native offline-init path the same way (custom `cline-xml-tools` wire api). The `RESULT` line gains `clineFactoryNetworkCalls`, `clineOfflineInitMs`, and `clineOfflineModels`.
+- **OpenGateway provider** — Added Gitlawb OpenGateway as a native OpenAI-compatible provider at `https://opengateway.gitlawb.com/v1`. It uses `OPENGATEWAY_API_KEY`, refreshes the gateway's live catalog through Pi's native model lifecycle, includes `auto` smart routing and current promotional/free models, and exposes `/toggle-opengateway` for switching between free-only and all models.
+
+### Changed
+
+- **Kilo native provider migration** — Kilo now registers as a native pi-ai `Provider` (the `createProvider` object form, via the single-argument `registerProvider(provider)`) with native `auth` (API key + OAuth device flow, persisted to `~/.pi/agent/auth.json` with token refresh owned by Pi) and `refreshModels(context)`. The extension factory no longer awaits any Kilo network I/O: models load via offline init from Pi's models store and a Pi-owned background refresh (4h throttle, abortable), so Kilo's cold-startup factory contribution drops from ~8.0s to ~33ms (bench-measured) and Kilo makes zero factory network calls. The free/paid toggle stays on `registerWithGlobalToggle` re-registration — it republishes the same native provider, so `/toggle-kilo` and `/toggle-free` keep working and native auth is preserved; the XML tool-leak handler, CI-score decoration, and Kilo compat overrides are unchanged. Kilo stops using `lib/provider-cache.ts` (the module remains for the other providers), and existing OAuth credentials are reused from `auth.json` with no destructive migration (re-login is the recovery path for malformed old credentials).
+- **Cline native provider migration** — Cline now registers as a native pi-ai `Provider` (the `createProvider` object form, via the single-argument `registerProvider(provider)`), the second port of the proven Kilo pattern. Native `auth` (API key + the existing OAuth callback-server flow, adapted to Pi's `AuthInteraction` exactly as Pi's own legacy-OAuth adapter did) persists to `~/.pi/agent/auth.json` — the same store the legacy `/login cline` already wrote, so existing credentials work with no migration — with token refresh now owned by Pi. The extension factory no longer awaits any Cline network I/O: models load via offline init from Pi's models store plus a Pi-owned background refresh of Cline's public catalog, so Cline makes zero factory network calls (bench: warm factory ~44–63ms → ~37–47ms; cold/fastcold factory fetch counts drop by Cline's two catalog URLs) and offline init measures ~0.3ms. Cline-specific: its model catalog is public, so the apiKey auth resolves even when unconfigured (Pi's sanctioned keyless pattern, per the pi-ai `faux` provider) and intentionally has no `check()` — Pi's availability check runs before filtering and would hide the public catalog before `/login cline`. The XML bridge message reshaping is carried over verbatim: both `stream` and `streamSimple` dispatch to `streamClineXml` with per-request VS Code-spoofing headers (the `X-Task-ID` still rotates on `before_agent_start`, now without a re-registration). `/toggle-cline` and `/toggle-free` keep working via `registerWithGlobalToggle` re-registration of the same native provider; CI-score decoration is unchanged. Cline stops using `lib/provider-cache.ts` (the module remains for other providers; old `cline` entries in users' `provider-cache.json` become orphans), and the hand-rolled session-start cache refresh is replaced by Pi's throttled background refresh (the freshness window widens from 1h to Pi's 4h throttle, traded for unified store ownership).
+- **Pi peer dependency minimum** — bumped the `@earendil-works/pi-*` peerDependencies from `>=0.80.8` to `>=0.81.0`, the first release that exposes the native `createProvider` / `registerProvider(provider)` extension surface publicly (verified: 0.80.10 lacks the overload, 0.83.0 has it). The range stays permissive (no upper bound) and the lockfile now resolves the peers to 0.83.0.
+- **Non-blocking file logging** — the structured logger (`lib/logger.ts`) now writes through a lazily-opened buffered append stream and ensures the log directory once, instead of a synchronous `appendFileSync` plus a directory check on every line. Removes ~15–20ms of synchronous disk I/O from warm startup (logging now adds ~0ms to the factory); log format, destination, and levels are unchanged, with a synchronous fallback if streams are unavailable.
+- **Startup fetch accounting** — legacy and dynamic model-fetch attempts now record per-provider cache/network attribution, elapsed wait time, and failures even when the startup deadline or provider API rejects. Cache persistence is no longer misreported as a network fetch.
+- **Remaining providers migrated to native registration** — All remaining pi-free providers now register through Pi's native provider surface. LLM7, ZenMux, TokenRouter, Ollama Cloud, B.AI, CrofAI, AnyAPI, SambaNova, Novita, DeepInfra, Routeway, and OpenModel join Kilo and Cline as native pi-ai `Provider` objects: the extension factory performs no catalog network I/O on startup, credentials and catalogs persist to Pi's stores, and `refreshModels(context)` handles offline init, abort, and the empty-result poisoning guard via shared lifecycle helpers (`registerNativeOpenAIProvider`, registrar/store-restore extraction). LLM7 and OpenModel keep keyless public catalogs (the pi-ai `faux` pattern); Ollama Cloud retains `/api/show` capability discovery, its provider-cache reuse, `/probe-ollama`, and auto-hide; TokenRouter preserves its custom streaming api, MiniMax thinking payload patching, high-load retry, and `<think>` normalization; OpenModel keeps its Anthropic Messages wire format and public-pricing-plus-authenticated-protocol merge; DeepInfra, RouteWay, SambaNova, and Novita probes now share a common OpenAI probe helper.
+- **Native free-model filtering capstone** — Native providers now expose their complete catalog from `getModels()`, with Pi applying the free/paid policy through each provider's native `filterModels` (`getShowPaid`), so catalog refreshes can never clobber the selected free/all view. Per-provider and global toggles re-register the same provider object only to invalidate Pi's availability snapshot, completing the native-provider migration across all extension providers.
+- **OpenCode free-model preservation and protocol routing** — pi-free now preserves Pi's authoritative free-model metadata and per-model protocol routing for OpenCode discovery. `big-pickle` stays in the free-only view even though `/models` omits pricing and the ID lacks a `-free` suffix; GPT, Claude/Qwen, Gemini, and chat-completions models are routed through the matching pi-ai adapters (`openai-responses`, `anthropic-messages`, `google-generative-ai`, `openai-completions`); warm/stale cached catalogs get the same normalization as fresh discovery; and OpenCode probes reuse the CLI-compatible session/request headers the stream wrapper sends (per Pi issue #2824).
+
+### Removed
+
+- **Together AI provider** — Retired pi-free's `together` provider (including its `/probe-together` command). Pi 0.83 ships a built-in `together` provider, and because `pi.registerProvider()` with a built-in ID silently overrides the built-in, pi-free's registration was an accidental hard collision: setting pi-free's `TOGETHER_AI_API_KEY` silently replaced Pi's native Together catalog. Migrate to Pi's built-in provider by setting `TOGETHER_API_KEY` instead (note the renamed variable).
+- **Dynamic fetchers for Mistral, Groq, Cerebras, xAI, and Hugging Face** — Retired the five `providers/dynamic-built-in` fetchers (and their `/toggle-mistral`, `/toggle-groq`, `/toggle-cerebras`, `/toggle-xai`, `/toggle-huggingface` commands). Pi now ships these as native built-in providers keyed on the identical env vars (`MISTRAL_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `XAI_API_KEY`, `HF_TOKEN`), so the fetchers were dormant redundancy that shadowed Pi's native catalogs; no env-var migration is needed. The OpenCode, OpenCode Go, and FastRouter fetchers are unchanged. A free-filter toggle port for these built-ins (à la OpenRouter) is a possible follow-up.
+
+### Fixed
+
+- **Cold-cache startup stall** — pi-free's extension factory awaits every provider model fetch, so on a cold or stale cache an unresponsive provider API could block Pi session start for tens of seconds (measured up to ~66s with several keyed providers). Startup model fetches are now bounded by an 8s deadline (`STARTUP_FETCH_DEADLINE_MS`, override with `PI_FREE_STARTUP_FETCH_TIMEOUT_MS`); on timeout a provider serves its stale cache — or an empty list on a true cold start — and refreshes on the next `session_start`. Worst-case cold startup drops from ~66s to ~8s; warm-cache startup (no network) is unaffected.
+- **Benchmark malformed-cache reporting** — The startup benchmark now reports malformed provider-cache JSON with the offending path. A corrupt `~/.pi/provider-cache.json` previously failed the bench with an uncontextualized `JSON.parse` exception; the cache root, `providers` object, and per-provider entries are now validated and reported explicitly.
+
 ## [2.2.10] - 2026-07-28
 
 ### Fixed

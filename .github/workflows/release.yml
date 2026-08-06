@@ -89,6 +89,18 @@ jobs:
         if: steps.meta.outputs.needs_npm_publish == 'true'
         run: npm run audit:prod
 
+      - name: Build compiled package
+        if: steps.meta.outputs.needs_npm_publish == 'true'
+        run: npm run build
+
+      - name: Check Pi extension-loader import policy
+        if: steps.meta.outputs.needs_npm_publish == 'true'
+        run: npm run check:runtime-imports
+
+      - name: Smoke-load compiled extension through Pi's loader
+        if: steps.meta.outputs.needs_npm_publish == 'true'
+        run: npm run smoke:pi-loader
+
       - name: Type-check
         if: steps.meta.outputs.needs_npm_publish == 'true'
         run: npm run lint
@@ -112,13 +124,14 @@ jobs:
           TARBALL=$(ls pi-free-*.tgz)
           node scripts/check-tarball.mjs "$TARBALL"
 
-      - name: Smoke-load source entry
+      - name: Smoke-load compiled entry
         if: steps.meta.outputs.needs_npm_publish == 'true'
         shell: bash
         run: |
           ENTRY=$(node -p "require('./package.json').pi.extensions[0]")
-          echo "Loading entry: $ENTRY"
-          node --import tsx "$ENTRY"
+          echo "Loading compiled entry: $ENTRY"
+          node scripts/smoke-compiled.mjs "$ENTRY"
+          node scripts/smoke-pi-loader.mjs "$ENTRY"
 
   release:
     runs-on: ubuntu-latest

@@ -26,6 +26,14 @@
  *   # or add openmodel_api_key to ~/.pi/free.json
  */
 
+import {
+	anthropicMessagesApi,
+	type Api,
+	type Credential,
+	type Model,
+	type Provider,
+	type RefreshModelsContext,
+} from "@earendil-works/pi-ai/compat";
 import type {
 	ExtensionAPI,
 	ProviderModelConfig,
@@ -44,12 +52,17 @@ import { createLogger } from "../../lib/logger.ts";
 import { safeEnrichModelsWithModelsDev } from "../../lib/model-metadata.ts";
 import { isLikelyReasoningModel } from "../../lib/provider-compat.ts";
 import { isFreeModel, registerWithGlobalToggle } from "../../lib/registry.ts";
-import { fetchWithRetry } from "../../lib/util.ts";
 import {
-	createReRegister,
-	loadCachedOrFetchModels,
-	setupProvider,
-} from "../../provider-helper.ts";
+	filterNativeModels,
+	persistNativeProviderModels,
+	restoreNativeProviderModels,
+	registerNativeProvider,
+	registerNativeProviderRefresh,
+	registerNativeProviderToggle,
+} from "../../lib/native-provider.ts";
+import { fetchWithRetry } from "../../lib/util.ts";
+import { enhanceWithCI, type StoredModels } from "../../provider-helper.ts";
+import { openmodelAuth } from "./openmodel-auth.ts";
 
 const _logger = createLogger("openmodel");
 
@@ -327,6 +340,7 @@ const OPENMODEL_PAGINATION_DELAY_MS = 200;
 
 async function fetchOpenModelWebCatalog(
 	baseUrl: string,
+	signal?: AbortSignal,
 ): Promise<OpenModelCatalogItem[]> {
 	const items: OpenModelCatalogItem[] = [];
 	let cleanBase = baseUrl;
@@ -339,7 +353,7 @@ async function fetchOpenModelWebCatalog(
 
 		const response = await fetchWithRetry(
 			url,
-			{ headers: { Accept: "application/json" } },
+			{ headers: { Accept: "application/json" }, signal },
 			3,
 			1000,
 			DEFAULT_FETCH_TIMEOUT_MS,
@@ -372,9 +386,21 @@ async function fetchOpenModelWebCatalog(
 		page += 1;
 		// Be polite to the public endpoint — small delay between pages.
 		// pi-lens-ignore: ast-grep, await-in-loop
-		await new Promise((resolve) =>
-			setTimeout(resolve, OPENMODEL_PAGINATION_DELAY_MS),
-		);
+		await new Promise<void>((resolve, reject) => {
+			if (signal?.aborted) {
+				reject(new DOMException("Aborted", "AbortError"));
+				return;
+			}
+			const timer = setTimeout(resolve, OPENMODEL_PAGINATION_DELAY_MS);
+			signal?.addEventListener(
+				"abort",
+				() => {
+					clearTimeout(timer);
+					reject(new DOMException("Aborted", "AbortError"));
+				},
+				{ once: true },
+			);
+		});
 	}
 
 	_logger.info(
@@ -386,6 +412,7 @@ async function fetchOpenModelWebCatalog(
 async function fetchOpenModelProtocols(
 	apiKey: string,
 	baseUrl: string,
+	signal?: AbortSignal,
 ): Promise<OpenModelProtocolItem[]> {
 	let cleanBase = baseUrl;
 	while (cleanBase.endsWith("/")) cleanBase = cleanBase.slice(0, -1);
@@ -396,6 +423,7 @@ async function fetchOpenModelProtocols(
 				Authorization: `Bearer ${apiKey}`,
 				Accept: "application/json",
 			},
+			signal,
 		},
 		3,
 		1000,
@@ -418,20 +446,23 @@ async function fetchOpenModelProtocols(
 
 async function fetchOpenModelModels(
 	apiKey: string,
+	signal?: AbortSignal,
 ): Promise<ProviderModelConfig[]> {
 	const [catalog, protocols] = await Promise.all([
-		fetchOpenModelWebCatalog(BASE_URL_OPENMODEL).catch((error) => {
+		fetchOpenModelWebCatalog(BASE_URL_OPENMODEL, signal).catch((error) => {
 			_logger.error("[openmodel] Failed to fetch public catalog", {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			return [] as OpenModelCatalogItem[];
 		}),
-		fetchOpenModelProtocols(apiKey, BASE_URL_OPENMODEL).catch((error) => {
-			_logger.error("[openmodel] Failed to fetch /v1/models", {
-				error: error instanceof Error ? error.message : String(error),
-			});
-			return [] as OpenModelProtocolItem[];
-		}),
+		fetchOpenModelProtocols(apiKey, BASE_URL_OPENMODEL, signal).catch(
+			(error) => {
+				_logger.error("[openmodel] Failed to fetch /v1/models", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+				return [] as OpenModelProtocolItem[];
+			},
+		),
 	]);
 
 	if (catalog.length === 0 && protocols.length === 0) {
@@ -456,77 +487,121 @@ async function fetchOpenModelModels(
 	return applyHidden(enriched, PROVIDER_OPENMODEL);
 }
 
+type OpenModelNative = Model<"anthropic-messages">;
+
+function toOpenModel(model: ProviderModelConfig): OpenModelNative {
+	return {
+		...model,
+		api: "anthropic-messages",
+		provider: PROVIDER_OPENMODEL,
+		baseUrl: BASE_URL_OPENMODEL,
+	} as OpenModelNative;
+}
+
+function openModelCredentialToken(
+	credential: Credential | undefined,
+): string | undefined {
+	if (credential?.type === "api_key") {
+		return credential.key ?? getOpenmodelApiKey();
+	}
+	return getOpenmodelApiKey();
+}
+
 // =============================================================================
 // Extension Entry Point
 // =============================================================================
 
-export default async function openmodelProvider(pi: ExtensionAPI) {
-	const apiKey = getOpenmodelApiKey();
+export default function openmodelProvider(pi: ExtensionAPI): Promise<void> {
+	const streams = anthropicMessagesApi();
+	const stored: StoredModels = { free: [], all: [] };
 
-	if (!apiKey) {
-		_logger.info(
-			"[openmodel] Skipping — OPENMODEL_API_KEY not set. Sign up at https://openmodel.ai/",
-		);
-		return;
+	function ingest(
+		all: ProviderModelConfig[],
+		free?: ProviderModelConfig[],
+	): void {
+		stored.all = enhanceWithCI(all, PROVIDER_OPENMODEL).map(toOpenModel);
+		stored.free = (
+			free ??
+			stored.all.filter((model) =>
+				isFreeModel({ ...model, provider: PROVIDER_OPENMODEL }, stored.all),
+			)
+		).map(toOpenModel);
 	}
 
-	const allModels = await loadCachedOrFetchModels(PROVIDER_OPENMODEL, () =>
-		fetchOpenModelModels(apiKey),
-	);
-
-	if (allModels.length === 0) {
-		_logger.warn(
-			"[openmodel] No models available — verify OPENMODEL_API_KEY is valid and see ~/.pi/free.log for details",
-		);
-		return;
-	}
-
-	// isFreeModel handles the heavy lifting:
-	//   - Priced models (multiplier>0): Route A — free if effective cost is 0.
-	//   - Free-event models (multiplier=0, e.g. deepseek-v4-flash): Route A
-	//     sees cost 0 → free. This is the headline free model.
-	//   - Unpriced models: _freeKnown=true, _isFree=false → definitively paid.
-	const freeModels = allModels.filter((m) =>
-		isFreeModel({ ...m, provider: PROVIDER_OPENMODEL }, allModels),
-	);
-	const stored = { free: freeModels, all: allModels };
-
-	_logger.info(
-		`[openmodel] Registered ${allModels.length} models (${freeModels.length} free)`,
-	);
-
-	const reRegister = createReRegister(pi, {
-		providerId: PROVIDER_OPENMODEL,
+	const provider: Provider<"anthropic-messages"> = {
+		id: PROVIDER_OPENMODEL,
+		name: "OpenModel",
 		baseUrl: BASE_URL_OPENMODEL,
-		apiKey,
-		// OpenModel is an Anthropic-protocol gateway — /v1/chat/completions
-		// does not exist on it. Without `api: "anthropic-messages"`, the
-		// helper defaults to openai-completions and pi-ai POSTs to a 404
-		// path. Pin the wire format so it dispatches to the Anthropic SDK.
-		api: "anthropic-messages",
-	});
+		auth: openmodelAuth,
+		headers: { "User-Agent": "pi-free-providers" },
+		getModels: () =>
+			(stored.all.length > 0 ? stored.all : stored.free) as OpenModelNative[],
+		filterModels: (models) =>
+			filterNativeModels(PROVIDER_OPENMODEL, models, {
+				showPaid: getOpenmodelShowPaid(),
+				freeModels: stored.free,
+			}),
+		refreshModels: async (context: RefreshModelsContext) => {
+			await restoreNativeProviderModels(
+				PROVIDER_OPENMODEL,
+				context,
+				(storedModels: OpenModelNative[]) => {
+					stored.all = storedModels;
+					stored.free = storedModels.filter((model) =>
+						isFreeModel(
+							{ ...model, provider: PROVIDER_OPENMODEL },
+							storedModels,
+						),
+					);
+				},
+			);
+			if (!context.allowNetwork || context.signal?.aborted) return;
 
-	registerWithGlobalToggle(PROVIDER_OPENMODEL, stored, reRegister, true);
-
-	setupProvider(
-		pi,
-		{
-			providerId: PROVIDER_OPENMODEL,
-			initialShowPaid: getOpenmodelShowPaid(),
-			tosUrl: "https://docs.openmodel.ai/en/docs",
-			reRegister: (models, _stored) => {
-				if (_stored) {
-					stored.free = _stored.free;
-					stored.all = _stored.all;
-				}
-				reRegister(models);
-			},
+			const token = openModelCredentialToken(context.credential);
+			if (!token) return;
+			const models = await fetchOpenModelModels(token, context.signal);
+			if (context.signal?.aborted || models.length === 0) return;
+			const free = models.filter((model) =>
+				isFreeModel({ ...model, provider: PROVIDER_OPENMODEL }, models),
+			);
+			ingest(models, free);
+			await persistNativeProviderModels(
+				PROVIDER_OPENMODEL,
+				context,
+				stored.all as unknown as readonly Model<Api>[],
+			);
 		},
-		stored,
-	);
+		stream: (model, context, options) =>
+			streams.stream(model, context, options),
+		streamSimple: (model, context, options) =>
+			streams.streamSimple(model, context, options),
+	};
 
-	const showPaid = getOpenmodelShowPaid();
-	const initialModels =
-		showPaid && stored.all.length > 0 ? stored.all : freeModels;
-	reRegister(initialModels);
+	registerNativeProvider(pi, provider);
+	const reRegister = () => registerNativeProvider(pi, provider);
+	registerWithGlobalToggle(
+		PROVIDER_OPENMODEL,
+		stored,
+		reRegister,
+		Boolean(getOpenmodelApiKey()),
+		{ native: true, invalidate: reRegister },
+	);
+	registerNativeProviderToggle(pi, {
+		providerId: PROVIDER_OPENMODEL,
+		stored,
+		getShowPaid: getOpenmodelShowPaid,
+		reRegister,
+	});
+	registerNativeProviderRefresh(pi, PROVIDER_OPENMODEL);
+
+	let tosShown = false;
+	pi.on("model_select", (_event, ctx) => {
+		if (tosShown || ctx.model?.provider !== PROVIDER_OPENMODEL) return;
+		tosShown = true;
+			_logger.debug("Free-model terms notice", {
+			provider: PROVIDER_OPENMODEL,
+			termsUrl: "https://docs.openmodel.ai/en/docs",
+		});
+	});
+	return Promise.resolve();
 }

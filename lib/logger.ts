@@ -4,12 +4,18 @@
  *
  * File logging:
  * - Default file: ~/.pi/free.log
- * - Override path: PI_FREE_LOG_PATH=/custom/path/free.log
+ * - Override filename: PI_FREE_LOG_PATH=custom-free.log
  * - Disable file logging: PI_FREE_FILE_LOG=false
+ * - Rotate size: PI_FREE_LOG_MAX_BYTES=10485760 (default 10 MiB; 3 backups)
  */
 
-import { appendFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+	appendFileSync,
+	createWriteStream,
+	type WriteStream,
+} from "node:fs";
+import { mkdir as mkdirAsync, rename, rm, stat } from "node:fs/promises";
+import { dirname } from "node:path";
 import { ensureDir, resolveSafeDataFile } from "./paths.ts";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -72,15 +78,172 @@ function formatMessage(entry: LogEntry): string {
 
 const LOG_PATH = resolveSafeDataFile(process.env.PI_FREE_LOG_PATH, "free.log");
 const FILE_LOG_ENABLED = process.env.PI_FREE_FILE_LOG !== "false";
+const DEFAULT_MAX_LOG_BYTES = 10 * 1024 * 1024;
+const MAX_LOG_BYTES = parsePositiveInteger(
+	process.env.PI_FREE_LOG_MAX_BYTES,
+	DEFAULT_MAX_LOG_BYTES,
+);
+const LOG_BACKUP_COUNT = 3;
 
-function appendToFile(line: string): void {
-	if (!FILE_LOG_ENABLED) return;
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+	if (!value) return fallback;
+	const parsed = Number(value);
+	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// File logging is buffered through a lazily-opened append stream so startup
+// does not pay synchronous open/write/rotation work. The first stream open and
+// every size-based rotation use async fs operations; lines emitted while that
+// work is pending stay in a small in-memory queue. If streams are unavailable
+// (e.g. a minimal test mock), we retain the synchronous fallback.
+let logStream: WriteStream | null = null;
+let logDirEnsured = false;
+let logStreamUnavailable = false;
+let logStreamReady: Promise<void> | null = null;
+let logBytes = 0;
+const queuedLines: string[] = [];
+
+function ensureLogDirOnce(): void {
+	if (logDirEnsured) return;
+	ensureDir(dirname(LOG_PATH));
+	logDirEnsured = true;
+}
+
+async function ensureLogDirAsync(): Promise<void> {
+	if (logDirEnsured) return;
+	await mkdirAsync(dirname(LOG_PATH), { recursive: true });
+	logDirEnsured = true;
+}
+
+async function moveLog(source: string, target: string): Promise<void> {
 	try {
-		ensureDir(join(LOG_PATH, ".."));
-		appendFileSync(LOG_PATH, `${line}\n`, "utf8");
+		await rm(target, { force: true });
+		await rename(source, target);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+	}
+}
+
+async function rotateLogFilesIfNeeded(force = false): Promise<void> {
+	let size: number;
+	try {
+		size = (await stat(LOG_PATH)).size;
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw err;
+	}
+	if (!force && size < MAX_LOG_BYTES) return;
+
+	for (let index = LOG_BACKUP_COUNT; index >= 1; index--) {
+		const source = index === 1 ? LOG_PATH : `${LOG_PATH}.${index - 1}`;
+		await moveLog(source, `${LOG_PATH}.${index}`);
+	}
+}
+
+function flushQueuedFallback(): void {
+	if (queuedLines.length === 0) return;
+	const lines = queuedLines.splice(0);
+	try {
+		ensureLogDirOnce();
+		appendFileSync(LOG_PATH, lines.join(""), "utf8");
 	} catch (err) {
 		console.error("Failed to write to log file:", err);
 	}
+}
+
+function attachLogStream(stream: WriteStream, existingBytes: number): void {
+	stream.on("error", (err) => {
+		console.error("Failed to write to log file:", err);
+		logStreamUnavailable = true;
+		logStream = null;
+		flushQueuedFallback();
+	});
+	logStream = stream;
+	logBytes = existingBytes;
+	const pending = queuedLines.splice(0);
+	for (let index = 0; index < pending.length; index++) {
+		const line = pending[index];
+		const bytes = Buffer.byteLength(line, "utf8");
+		if (logBytes > 0 && logBytes + bytes > MAX_LOG_BYTES) {
+			queuedLines.push(...pending.slice(index));
+			break;
+		}
+		stream.write(line);
+		logBytes += bytes;
+	}
+}
+
+async function openLogStream(forceRotate = false): Promise<void> {
+	await ensureLogDirAsync();
+	await rotateLogFilesIfNeeded(forceRotate);
+	let existingBytes = 0;
+	try {
+		existingBytes = (await stat(LOG_PATH)).size;
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+	}
+	if (typeof createWriteStream !== "function") {
+		logStreamUnavailable = true;
+		flushQueuedFallback();
+		return;
+	}
+	const stream = createWriteStream(LOG_PATH, {
+		flags: "a",
+		encoding: "utf8",
+	});
+	attachLogStream(stream, existingBytes);
+}
+
+function finishLogStreamOperation(): void {
+	logStreamReady = null;
+	if (logStream && (logBytes >= MAX_LOG_BYTES || queuedLines.length > 0)) {
+		queueMicrotask(() => startLogStream(true));
+	}
+}
+
+function startLogStream(rotationRequested = false): void {
+	if (logStreamReady) return;
+	if (logStreamUnavailable) {
+		flushQueuedFallback();
+		return;
+	}
+	if (logStream && !rotationRequested) return;
+
+	if (logStream && rotationRequested) {
+		const oldStream = logStream;
+		logStream = null;
+		logStreamReady = new Promise<void>((resolve) => oldStream.end(resolve))
+			.then(() => openLogStream(true))
+			.catch((err) => {
+				console.error("Failed to rotate log file:", err);
+				logStreamUnavailable = true;
+				flushQueuedFallback();
+			})
+			.finally(finishLogStreamOperation);
+		return;
+	}
+
+	logStreamReady = openLogStream()
+		.catch((err) => {
+			console.error("Failed to open log file stream:", err);
+			logStreamUnavailable = true;
+			flushQueuedFallback();
+		})
+		.finally(finishLogStreamOperation);
+}
+
+function appendToFile(line: string): void {
+	if (!FILE_LOG_ENABLED) return;
+	const formatted = `${line}\n`;
+	const bytes = Buffer.byteLength(formatted, "utf8");
+	if (logStream && logBytes + bytes < MAX_LOG_BYTES) {
+		logStream.write(formatted);
+		logBytes += bytes;
+		return;
+	}
+
+	queuedLines.push(formatted);
+	startLogStream(Boolean(logStream));
 }
 
 function log(
@@ -124,6 +287,14 @@ function log(
 			console.error(formatted);
 			break;
 	}
+}
+
+export function getLogPath(): string {
+	return LOG_PATH;
+}
+
+export function isFileLoggingEnabled(): boolean {
+	return FILE_LOG_ENABLED;
 }
 
 export const logger = {

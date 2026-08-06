@@ -1,266 +1,198 @@
 /**
- * Kilo Provider Tests
+ * Kilo extension wiring tests (native createProvider object form).
+ *
+ * The provider object itself is unit-tested in kilo-provider.test.ts; here we
+ * mock createKiloProvider and assert the extension factory wires it up correctly:
+ *   - registers the native provider via the single-arg registerProvider(provider)
+ *   - participates in the global toggle (registerWithGlobalToggle)
+ *   - /toggle-kilo flips show_paid and re-registers the same provider object
+ *   - model_select ToS notice + session_start handler
+ *   - OAuth-aware ToS suppression through the model registry
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Create mock functions first
-const mockFetchKiloModels = vi.fn();
-const mockSetupProvider = vi.fn();
-const mockLoginKilo = vi.fn();
-const mockGetKiloApiKey = vi.hoisted(() => vi.fn((): string | undefined => undefined));
-
-// Mock dependencies before importing the provider
-vi.mock("../providers/kilo/kilo-auth.ts", () => ({
-	loginKilo: (...args: unknown[]) => mockLoginKilo(...args),
-	refreshKiloToken: vi.fn(),
+const mockGetKiloApiKey = vi.hoisted(() =>
+	vi.fn((): string | undefined => undefined),
+);
+const mockGetKiloShowPaid = vi.hoisted(() => vi.fn(() => false));
+const mockSaveConfig = vi.hoisted(() =>
+	vi.fn<(...args: unknown[]) => Promise<void>>(),
+);
+const mockRegisterWithGlobalToggle = vi.hoisted(() =>
+	vi.fn<(...args: unknown[]) => void>(),
+);
+const mockProvider = vi.hoisted(() => ({
+	id: "kilo",
+	name: "Kilo",
+	auth: { apiKey: { name: "Kilo API key" }, oauth: { name: "Kilo" } },
+	getModels: () => [],
 }));
-
-vi.mock("../providers/kilo/kilo-models.ts", () => ({
-	fetchKiloModels: (...args: unknown[]) => mockFetchKiloModels(...args),
-	KILO_GATEWAY_BASE: "https://api.kilo.ai/api/gateway",
+const mockStored = vi.hoisted(() => ({
+	free: [] as unknown[],
+	all: [] as unknown[],
 }));
-
-vi.mock("../provider-helper.ts", () => ({
-	createReRegister: vi.fn(() => vi.fn()),
-	enhanceWithCI: (models: unknown[]) => models,
-	// Cold-path simulation matching the real helper with an empty (mocked) cache:
-	// invoke the fetcher, return [] on rejection.
-	loadCachedOrFetchModels: async (
-		_id: string,
-		fetcher: () => Promise<unknown[]>,
-	) => {
-		try {
-			return await fetcher();
-		} catch {
-			return [];
-		}
-	},
-}));
-
-vi.mock("../lib/registry.ts", () => ({
-	registerWithGlobalToggle: vi.fn(),
-	isFreeModel: (m: { cost?: { input?: number } }) => (m.cost?.input ?? 0) === 0,
+const mockLogger = vi.hoisted(() => ({
+	info: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
+	debug: vi.fn(),
 }));
 
 vi.mock("../config.ts", () => ({
-	getKiloFreeOnly: vi.fn(() => false),
-	getKiloShowPaid: vi.fn(() => false),
 	getKiloApiKey: () => mockGetKiloApiKey(),
+	getKiloShowPaid: () => mockGetKiloShowPaid(),
+	saveConfig: (...args: unknown[]) => mockSaveConfig(...args),
 	PROVIDER_KILO: "kilo",
 }));
 
-vi.mock("../lib/util.ts", () => ({
-	logWarning: vi.fn(),
+vi.mock("../lib/registry.ts", () => ({
+	registerWithGlobalToggle: (...args: unknown[]) =>
+		mockRegisterWithGlobalToggle(...args),
 }));
 
-vi.mock("../lib/provider-cache.ts", () => ({
-	DEFAULT_PROVIDER_CACHE_TTL_MS: 60 * 60 * 1000,
-	isProviderCacheFresh: () => false,
-	loadProviderCache: () => undefined,
-	saveProviderCache: vi.fn().mockResolvedValue(undefined),
-	saveProviderCacheGuarded: vi.fn().mockResolvedValue(true),
-	clearProviderCache: vi.fn(),
-	clearAllProviderCaches: vi.fn(),
+vi.mock("../providers/kilo/kilo-provider.ts", () => ({
+	createKiloProvider: () => ({
+		provider: mockProvider,
+		stored: mockStored,
+		ingest: vi.fn(),
+	}),
+}));
+
+vi.mock("../lib/logger.ts", () => ({
+	createLogger: () => mockLogger,
 }));
 
 import kiloProvider from "../providers/kilo/kilo.ts";
 
-describe("Kilo Provider", () => {
+describe("Kilo extension wiring", () => {
 	let mockPi: ExtensionAPI;
 	let mockRegisterProvider: ReturnType<typeof vi.fn>;
 	let mockOn: ReturnType<typeof vi.fn>;
+	let mockRegisterCommand: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mockFetchKiloModels.mockReset();
-		mockSetupProvider.mockReset();
-		mockLoginKilo.mockReset();
 		mockGetKiloApiKey.mockReturnValue(undefined);
+		mockGetKiloShowPaid.mockReturnValue(false);
+		mockStored.free = [{ id: "free-1" }];
+		mockStored.all = [{ id: "free-1" }, { id: "paid-1" }];
 
 		mockRegisterProvider = vi.fn();
 		mockOn = vi.fn();
-
+		mockRegisterCommand = vi.fn();
 		mockPi = {
 			registerProvider: mockRegisterProvider,
 			on: mockOn,
-			registerCommand: vi.fn(),
+			registerCommand: mockRegisterCommand,
 		} as unknown as ExtensionAPI;
 	});
 
-	describe("initialization", () => {
-		it("should register provider with free models on startup", async () => {
-			const mockModels = [
-				{
-					id: "gpt-4",
-					name: "GPT-4",
-					reasoning: true,
-					input: ["text"],
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-					contextWindow: 128000,
-					maxTokens: 4096,
-				},
-			];
-			mockFetchKiloModels.mockResolvedValue(mockModels);
-
-			await kiloProvider(mockPi);
-
-			expect(mockRegisterProvider).toHaveBeenCalledWith(
-				"kilo",
-				expect.objectContaining({
-					baseUrl: "https://api.kilo.ai/api/gateway",
-					apiKey: "$KILO_API_KEY",
-					api: "openai-completions",
-					models: mockModels.map((m) =>
-						expect.objectContaining({
-							id: m.id,
-							compat: {
-								maxTokensField: "max_tokens",
-								supportsDeveloperRole: false,
-								supportsReasoningEffort: false,
-								supportsStore: false,
-								supportsStrictMode: false,
-								supportsUsageInStreaming: false,
-								thinkingFormat: "openrouter",
-							},
-						}),
-					),
-					oauth: expect.any(Object),
-				}),
-			);
-		});
-
-		it("should handle model fetch failure gracefully", async () => {
-			mockFetchKiloModels.mockRejectedValue(new Error("Network error"));
-
-			await kiloProvider(mockPi);
-
-			// Should still register with empty models
-			expect(mockRegisterProvider).toHaveBeenCalled();
-		});
-
-		it("should use API key auth when configured", async () => {
-			mockGetKiloApiKey.mockReturnValue("sk-kilo-test");
-			const mockModels = [
-				{
-					id: "gpt-4",
-					name: "GPT-4",
-					reasoning: true,
-					input: ["text"],
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-					contextWindow: 128000,
-					maxTokens: 4096,
-				},
-			];
-			mockFetchKiloModels.mockResolvedValue(mockModels);
-
-			await kiloProvider(mockPi);
-
-			expect(mockFetchKiloModels).toHaveBeenCalledWith(
-				expect.objectContaining({ token: "sk-kilo-test", freeOnly: false }),
-			);
-			expect(mockRegisterProvider).toHaveBeenCalledWith(
-				"kilo",
-				expect.objectContaining({
-					apiKey: "sk-kilo-test",
-				}),
-			);
-			const registerCall = mockRegisterProvider.mock.calls[0];
-			expect(registerCall[1]).not.toHaveProperty("oauth");
-		});
+	it("registers the native provider object via single-arg registerProvider", async () => {
+		await kiloProvider(mockPi);
+		// Single-arg native form: the provider object, no legacy config.
+		expect(mockRegisterProvider).toHaveBeenCalledWith(mockProvider);
+		expect(mockRegisterProvider.mock.calls[0]).toHaveLength(1);
 	});
 
-	describe("registerWithGlobalToggle integration", () => {
-		it("should call registerWithGlobalToggle with hasKey=false by default", async () => {
-			const { registerWithGlobalToggle } = await import("../lib/registry.ts");
-			mockFetchKiloModels.mockResolvedValue([]);
-
-			await kiloProvider(mockPi);
-
-			expect(registerWithGlobalToggle).toHaveBeenCalledWith(
-				"kilo",
-				expect.objectContaining({ free: [], all: [] }),
-				expect.any(Function),
-				false,
-			);
-		});
-
-		it("should call registerWithGlobalToggle with hasKey=true when API key is set", async () => {
-			mockGetKiloApiKey.mockReturnValue("sk-kilo-test");
-			const { registerWithGlobalToggle } = await import("../lib/registry.ts");
-			mockFetchKiloModels.mockResolvedValue([]);
-
-			await kiloProvider(mockPi);
-
-			expect(registerWithGlobalToggle).toHaveBeenCalledWith(
-				"kilo",
-				expect.objectContaining({ free: [], all: [] }),
-				expect.any(Function),
-				true,
-			);
-		});
+	it("performs no network I/O in the factory (models load via refreshModels)", async () => {
+		await kiloProvider(mockPi);
+		// The factory only builds + registers; it never awaits a fetch. The
+		// provider's getModels still returns its (empty) baseline at this point.
+		expect(mockProvider.getModels()).toEqual([]);
 	});
 
-	describe("OAuth integration", () => {
-		it("should have oauth configuration", async () => {
-			mockFetchKiloModels.mockResolvedValue([]);
+	it("registers with the global toggle system (hasKey=false by default)", async () => {
+		await kiloProvider(mockPi);
+		expect(mockRegisterWithGlobalToggle).toHaveBeenCalledWith(
+			"kilo",
+			mockStored,
+			expect.any(Function),
+			false,
+			expect.objectContaining({ native: true }),
+		);
+	});
 
+	it("registers with hasKey=true when an API key is configured", async () => {
+		mockGetKiloApiKey.mockReturnValue("sk-kilo-test");
+		await kiloProvider(mockPi);
+		expect(mockRegisterWithGlobalToggle).toHaveBeenCalledWith(
+			"kilo",
+			mockStored,
+			expect.any(Function),
+			true,
+			expect.objectContaining({ native: true }),
+		);
+	});
+
+	it("global-toggle reRegister republishes the same provider object", async () => {
+		await kiloProvider(mockPi);
+		const reRegister = mockRegisterWithGlobalToggle.mock.calls[0][2] as () => void;
+		mockRegisterProvider.mockClear();
+
+		reRegister();
+
+		expect(mockRegisterProvider).toHaveBeenCalledWith(mockProvider);
+	});
+
+	describe("/toggle-kilo command", () => {
+		it("flips show_paid, persists, and republishes the chosen catalog", async () => {
 			await kiloProvider(mockPi);
+			const call = mockRegisterCommand.mock.calls.find(
+				(c) => c[0] === "toggle-kilo",
+			);
+			expect(call).toBeDefined();
+			if (!call) throw new Error("toggle-kilo not registered");
+			const notify = vi.fn();
+			mockRegisterProvider.mockClear();
 
-			const registerCall = mockRegisterProvider.mock.calls[0];
-			expect(registerCall[1]).toHaveProperty("oauth");
-			expect(registerCall[1].oauth).toHaveProperty("name", "Kilo");
-			expect(registerCall[1].oauth).toHaveProperty("login");
-			expect(registerCall[1].oauth).toHaveProperty("refreshToken");
-			expect(registerCall[1].oauth).toHaveProperty("getApiKey");
-			expect(registerCall[1].oauth).toHaveProperty("modifyModels");
-		});
+			await call[1].handler({}, { ui: { notify } });
 
-		it("should fetch all models after login", async () => {
-			mockFetchKiloModels.mockResolvedValue([]);
-
-			await kiloProvider(mockPi);
-
-			const oauth = mockRegisterProvider.mock.calls[0][1].oauth;
-
-			mockFetchKiloModels.mockResolvedValue([
-				{ id: "gpt-4", name: "GPT-4" },
-				{ id: "claude-3", name: "Claude 3" },
-			]);
-
-			await oauth.login({ onProgress: vi.fn() });
-
-			expect(mockFetchKiloModels).toHaveBeenCalled();
+			expect(mockSaveConfig).toHaveBeenCalledWith({ kilo_show_paid: true });
+			expect(mockRegisterProvider).toHaveBeenCalledWith(mockProvider);
+			expect(notify).toHaveBeenCalledWith(
+				expect.stringContaining("showing all 2 models"),
+				"info",
+			);
 		});
 	});
 
 	describe("event handlers", () => {
-		it("should register session_start handler", async () => {
-			mockFetchKiloModels.mockResolvedValue([]);
-
+		it("registers model_select, message_end, and session_start handlers", async () => {
 			await kiloProvider(mockPi);
+			const events = mockOn.mock.calls.map((c) => c[0]);
+			expect(events).toContain("model_select");
+			expect(events).toContain("message_end");
+			expect(events).toContain("session_start");
+		});
 
-			expect(mockOn).toHaveBeenCalledWith(
-				"session_start",
-				expect.any(Function),
+		it("logs a ToS event on first Kilo model selection without a model registry", async () => {
+			await kiloProvider(mockPi);
+			const call = mockOn.mock.calls.find((c) => c[0] === "model_select");
+			if (!call) throw new Error("model_select not registered");
+			const notify = vi.fn();
+			await call[1]({}, { model: { provider: "kilo" }, ui: { notify } });
+			expect(notify).not.toHaveBeenCalled();
+			expect(mockLogger.debug).toHaveBeenCalledWith(
+				"Free-model terms notice",
+				expect.objectContaining({ provider: "kilo", termsUrl: expect.any(String) }),
 			);
 		});
-	});
 
-	describe("registerWithGlobalToggle integration", () => {
-		it("should call registerWithGlobalToggle with correct config", async () => {
-			const { registerWithGlobalToggle } = await import("../lib/registry.ts");
-			mockFetchKiloModels.mockResolvedValue([]);
-
+		it("skips the ToS notice when the current model uses OAuth", async () => {
 			await kiloProvider(mockPi);
-
-			expect(registerWithGlobalToggle).toHaveBeenCalledWith(
-				"kilo",
-				expect.objectContaining({ free: [], all: [] }),
-				expect.any(Function),
-				expect.any(Boolean),
-			);
+			const call = mockOn.mock.calls.find((c) => c[0] === "model_select");
+			if (!call) throw new Error("model_select not registered");
+			const notify = vi.fn();
+			const isUsingOAuth = vi.fn(() => true);
+			await call[1]({}, {
+				model: { provider: "kilo" },
+				modelRegistry: { isUsingOAuth },
+				ui: { notify },
+			});
+			expect(isUsingOAuth).toHaveBeenCalledWith({ provider: "kilo" });
+			expect(notify).not.toHaveBeenCalled();
 		});
 	});
 });

@@ -3,16 +3,19 @@
  *
  * Fetches Cline's own model catalog from api.cline.bot instead of OpenRouter.
  * Cline also exposes a recommended/free-to-try list; those models may have
- * non-zero list pricing in the catalog, so we mark exact recommended-free IDs
- * as zero-cost for pi-free's free-model filter.
+ * non-zero list pricing in the catalog, so we mark recommended-free IDs (and
+ * their conservative provider/date aliases) as zero-cost for pi-free's
+ * free-model filter.
  */
 
+import type { Model } from "@earendil-works/pi-ai/compat";
 import { applyHidden } from "../../config.ts";
 import {
 	BASE_URL_CLINE,
 	DEFAULT_FETCH_TIMEOUT_MS,
 	PROVIDER_CLINE,
 } from "../../constants.ts";
+import { isFreeModel } from "../../lib/registry.ts";
 import type { ProviderModelConfig } from "../../lib/types.ts";
 import { safeEnrichModelsWithModelsDev } from "../../lib/model-metadata.ts";
 import { getProxyModelCompat } from "../../lib/provider-compat.ts";
@@ -130,6 +133,53 @@ function modelFromRecommended(
 	};
 }
 
+// Cline's free endpoint can use a provider-qualified ID while the catalog
+// uses the leaf ID (or vice versa). It also occasionally gives a dated
+// catalog entry for an otherwise identical recommended model, for example
+// `deepseek-v4-flash` -> `deepseek-v4-flash-0731`.
+//
+// Keep this deliberately narrow: only valid date-shaped release suffixes are
+// removed, and two provider-qualified IDs must have the same qualifier. This
+// avoids turning similarly named paid variants (such as `-pro`) into free ones.
+const CLINE_RELEASE_DATE_SUFFIX =
+	/(?:-(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])|-(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])|-(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))$/;
+
+function splitClineModelId(id: string): {
+	qualifier?: string;
+	leaf: string;
+} {
+	const separator = id.lastIndexOf("/");
+	return separator < 0
+		? { leaf: id }
+		: { qualifier: id.slice(0, separator), leaf: id.slice(separator + 1) };
+}
+
+function stripClineReleaseDateSuffix(id: string): string {
+	return id.replace(CLINE_RELEASE_DATE_SUFFIX, "");
+}
+
+function isClineFreeToTryId(
+	modelId: string,
+	freeToTryIds: ReadonlySet<string>,
+): boolean {
+	if (freeToTryIds.has(modelId)) return true;
+
+	const model = splitClineModelId(modelId);
+	const normalizedModelLeaf = stripClineReleaseDateSuffix(model.leaf);
+	for (const freeToTryId of freeToTryIds) {
+		const free = splitClineModelId(freeToTryId);
+		if (model.qualifier && free.qualifier && model.qualifier !== free.qualifier) {
+			continue;
+		}
+		if (
+			normalizedModelLeaf === stripClineReleaseDateSuffix(free.leaf)
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
 function modelFromCatalog(
 	info: ClineRaw,
 	freeToTryIds: ReadonlySet<string>,
@@ -138,7 +188,7 @@ function modelFromCatalog(
 		info.supported_parameters?.includes("include_reasoning") ||
 		info.supported_parameters?.includes("reasoning")
 	);
-	const isFreeToTry = freeToTryIds.has(info.id);
+	const isFreeToTry = isClineFreeToTryId(info.id, freeToTryIds);
 	const inputCost = isFreeToTry ? 0 : parsePricing(info.pricing?.prompt);
 	const outputCost = isFreeToTry ? 0 : parsePricing(info.pricing?.completion);
 	const cacheRead = isFreeToTry
@@ -257,4 +307,62 @@ export async function fetchClineModels(
  */
 export async function fetchClineFreeModels(): Promise<ProviderModelConfig[]> {
 	return fetchClineModels(true);
+}
+
+// =============================================================================
+// Native provider catalog (createProvider object form)
+// =============================================================================
+
+/**
+ * Fetch the full Cline catalog, split into `{ all, free }` using the shared
+ * adaptive free detection. The catalog is public (no credential required).
+ *
+ * Never throws: on a total failure both arrays are empty so callers can retain
+ * their previous list (poisoning guard) and recover on a later refresh. Honors
+ * the shared abort signal between fetch and split.
+ */
+export async function fetchClineCatalog(options?: {
+	signal?: AbortSignal;
+}): Promise<{ all: ProviderModelConfig[]; free: ProviderModelConfig[] }> {
+	let all: ProviderModelConfig[];
+	try {
+		all = await fetchClineModels(false);
+	} catch {
+		all = [];
+	}
+
+	if (options?.signal?.aborted) {
+		return { all: [], free: [] };
+	}
+
+	const free = all.filter((m) =>
+		isFreeModel({ ...m, provider: PROVIDER_CLINE }, all),
+	);
+	return { all, free };
+}
+
+/**
+ * Convert a fetched ProviderModelConfig into the concrete pi-ai
+ * `Model<"cline-xml-tools">` shape a native provider's getModels() returns.
+ * Adds the provider id, the custom wire api, and the gateway baseUrl that the
+ * legacy registerProvider config form used to supply implicitly.
+ */
+export function toClineModel(
+	m: ProviderModelConfig,
+): Model<"cline-xml-tools"> {
+	return {
+		...m,
+		api: "cline-xml-tools",
+		provider: PROVIDER_CLINE,
+		// The legacy registration supplied a single provider-level baseUrl;
+		// every Cline model shares the Cline gateway.
+		baseUrl: BASE_URL_CLINE,
+	} as Model<"cline-xml-tools">;
+}
+
+/** Convert a batch of model configs to native Model objects. */
+export function toClineModels(
+	models: ProviderModelConfig[],
+): Model<"cline-xml-tools">[] {
+	return models.map(toClineModel);
 }

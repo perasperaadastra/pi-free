@@ -1,6 +1,6 @@
 {
 	"name": "pi-free",
-	"version": "2.2.10",
+	"version": "2.4.4",
 	"type": "module",
 	"description": "AI model providers for Pi with free model filtering and dynamic model fetching",
 	"keywords": [
@@ -29,30 +29,34 @@
 	"engines": {
 		"node": ">=20.0.0"
 	},
+	"main": "./dist/index.js",
 	"files": [
-		"index.ts",
-		"providers/**/*.ts",
-		"lib/**/*.ts",
-		"provider-failover/**/*.ts",
-		"provider-failover/**/*.json",
-		"config.ts",
-		"constants.ts",
-		"provider-helper.ts",
+		"dist/**/*",
 		"README.md",
 		"LICENSE",
 		"CHANGELOG.md",
 		"banner.svg",
-		"scripts/check-extensions.mjs"
+		"scripts/check-extensions.mjs",
+		"scripts/pi-install-smoke.mjs",
+		"scripts/rpc-load-check.mjs"
 	],
 	"scripts": {
-		"audit:prod": "npm audit --omit=dev --audit-level=high",
+		"audit:prod": "npm audit --omit=dev --omit=peer --audit-level=high",
+		"build": "node scripts/build.mjs",
+		"clean": "node scripts/clean.mjs",
 		"check": "node scripts/check-extensions.mjs",
 		"check:lockfile": "node scripts/check-lockfile-sync.mjs",
+		"check:runtime-imports": "node scripts/check-runtime-imports.mjs",
 		"check:tarball": "node scripts/check-tarball.mjs",
 		"lint": "tsc --noEmit",
+		"prepare": "npm run build",
 		"test": "vitest",
 		"test:ui": "vitest --ui",
 		"test:run": "vitest run",
+		"bench:startup": "tsx scripts/bench-startup.ts",
+		"smoke:compiled": "node scripts/smoke-compiled.mjs",
+		"smoke:pi-loader": "node scripts/smoke-pi-loader.mjs",
+		"smoke:pi-install": "node scripts/pi-install-smoke.mjs",
 		"smoke:cline": "tsx scripts/smoke-cline-xml-bridge.ts",
 		"smoke:openmodel": "tsx scripts/smoke-openmodel-wire-format.ts"
 	},
@@ -67,9 +71,9 @@
 		"protobufjs": "^7.6.5"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-ai": ">=0.80.8",
-		"@earendil-works/pi-coding-agent": ">=0.80.8",
-		"@earendil-works/pi-tui": ">=0.80.8"
+		"@earendil-works/pi-ai": ">=0.81.0",
+		"@earendil-works/pi-coding-agent": ">=0.81.0",
+		"@earendil-works/pi-tui": ">=0.81.0"
 	},
 	"devDependencies": {
 		"@vitest/coverage-v8": "^4.1.10",
@@ -82,7 +86,7 @@
 	},
 	"pi": {
 		"extensions": [
-			"./index.ts"
+			"./dist/index.js"
 		]
 	}
 }

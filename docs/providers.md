@@ -1,219 +1,227 @@
 # Providers
 
-Full catalog of providers registered by pi-free, how to authenticate, and per-provider setup.
+Provider catalog, authentication, and setup for pi-free. Catalog contents and provider free tiers can change; this document intentionally does not publish model counts.
 
 ---
 
-## Provider Categories
+## Provider categories
 
-| Category | Emoji | Description |
-|---|---|---|
-| **Free** | ✅ | Models cost $0, no payment required |
-| **Freemium** | 🔄 | Free tier with limits, paid after |
-| **Paid** | 💳 | Requires credits or payment |
-| **Dynamic** | 🔧 | Fetched only when API key configured |
+| Category | Meaning |
+| --- | --- |
+| **Free/free-tier** | The provider offers free models or a free/basic plan. |
+| **Freemium** | A free quota or tier exists alongside paid usage. |
+| **Paid/trial** | Credits, payment, or a trial balance is required. |
+| **Built-in/native** | Pi owns the catalog lifecycle, including native model-store refresh. |
 
----
+## Native providers
 
-## ✅ Free Providers
+These providers use Pi's native provider surface and model store. Their toggles remain available even though Pi owns catalog refresh and credential persistence.
 
 ### Kilo
 
-Free models available immediately. More models after `/login kilo`.
+Kilo supports free models and paid catalog entries. Authenticate with OAuth or an API key:
 
-- No credit card required
-- Free tier: 200 requests/hour
-
-```
+```text
 /login kilo
 ```
 
-This opens your browser to Kilo's authorization page, shows a device code, and completes automatically once approved.
+```bash
+export KILO_API_KEY="..."
+```
 
-After login, run `/toggle-kilo` to switch between free-only and all models.
+Or set `kilo_api_key` in `~/.pi/free.json`. Kilo credentials are persisted by Pi in `~/.pi/agent/auth.json`. Use `/toggle-kilo` to change the visible catalog.
 
 ### Cline
 
-Free account required (no credit card). Uses local ports 48801-48811 for OAuth callback.
+Cline's model catalog is public, so models can appear before login. Login is required for chat requests:
 
-```
+```text
 /login cline
 ```
 
-### OpenRouter
-
-Free models available with a free API key. Get one at [openrouter.ai/keys](https://openrouter.ai/keys).
-
-Set via environment variable:
-
-```bash
-export OPENROUTER_API_KEY="sk-or-v1-..."
-```
-
-OpenRouter reads its key from Pi's built-in auth storage. Run `/toggle-openrouter` to switch between free-only and all models.
-
-### OpenModel
-
-6 free models including `deepseek-v4-flash` during the current free event (1M context, MoE; 10 RPM / 100K TPM daily quota).
-
-Requires API key — add to `~/.pi/free.json`:
-
-```json
-{
-  "openmodel_api_key": "YOUR_KEY"
-}
-```
+Cline also accepts `CLINE_API_KEY` or `cline_api_key`. OAuth/API-key credentials are stored by Pi in `~/.pi/agent/auth.json`. Its custom XML tool bridge is part of the native provider implementation.
 
 ### LLM7
 
-Free gateway routing across multiple providers through a single OpenAI-compatible endpoint.
-
-- Free tier: default/fast selectors, 100 req/hr, 20 req/min
-- Get free token at [token.llm7.io](https://token.llm7.io/)
+LLM7 provides free selector-based access through an OpenAI-compatible endpoint. Set `LLM7_API_KEY` or `llm7_api_key` as required by the service, then use `/toggle-llm7`.
 
 ```bash
 export LLM7_API_KEY="..."
 ```
 
-### TokenRouter
-
-1 free model (`MiniMax-M3`); requires API key with credits for the rest.
-
-```bash
-export TOKENROUTER_API_KEY="..."
-```
-
----
-
-## 🔄 Freemium Providers
-
-### AnyAPI
-
-Free plan with 100K ANY tokens per day and no credit card. AnyAPI is an OpenAI-compatible gateway with explicitly free models plus paid models.
-
-```bash
-export ANYAPI_API_KEY="..."
-```
-
-Use `/toggle-anyapi` to switch between free models and the full catalog. Details: [anyapi.ai/pricing](https://anyapi.ai/pricing).
-
 ### Ollama Cloud
 
-Usage-based free tier, resets every 5 hours + 7 days.
+Ollama Cloud provides usage-based free access alongside other catalog entries. Get a key from [Ollama](https://ollama.com/settings/keys):
 
 ```bash
 export OLLAMA_API_KEY="..."
 ```
 
-Or in `~/.pi/free.json`:
+Or set `ollama_api_key` in `~/.pi/free.json`. Use `/toggle-ollama-cloud`, `/probe-ollama`, and `/ollama-cloud-refresh`. Although Ollama is native, it retains `~/.pi/provider-cache.json` for `/api/show` capability reuse and the compatibility refresh command; Pi's native model store remains authoritative for native lifecycle initialization.
 
-```json
-{
-  "ollama_api_key": "YOUR_KEY",
-  "ollama_show_paid": true
-}
+### AnyAPI
+
+AnyAPI is an OpenAI-compatible gateway with a free plan and free-model entries:
+
+```bash
+export ANYAPI_API_KEY="..."
 ```
+
+Or set `anyapi_api_key`. Toggle with `/toggle-anyapi`.
 
 ### SambaNova
 
-Free tier: 20-480 RPM, 400-9600 RPD (no credit card). Models include Llama 3.3 70B, DeepSeek-V3/R1, Llama 4 Maverick.
+SambaNova offers a free tier with rate limits:
 
 ```bash
 export SAMBANOVA_API_KEY="..."
 ```
 
----
+Or set `sambanova_api_key`. Toggle with `/toggle-sambanova`; `/probe-sambanova` checks availability.
 
-## 💳 Paid Providers
+### TokenRouter
+
+TokenRouter is an OpenAI-compatible gateway with free and paid models:
+
+```bash
+export TOKENROUTER_API_KEY="..."
+```
+
+Or set `tokenrouter_api_key`. Toggle with `/toggle-tokenrouter`.
+
+### OpenModel
+
+OpenModel is an Anthropic Messages-compatible gateway. Free availability depends on the provider's current catalog and offers:
+
+```bash
+export OPENMODEL_API_KEY="..."
+```
+
+Or set `openmodel_api_key`. Toggle with `/toggle-openmodel`.
+
+### StepFun
+
+StepFun Step Plan is a native, paid OpenAI-compatible provider. Pi uses the Chat Completions endpoint at `https://api.stepfun.ai/step_plan/v1/chat/completions`; the same base also exposes an Anthropic-compatible Messages endpoint at `/messages` for clients such as Claude Code. Set `STEPFUN_API_KEY` or `stepfun_api_key` and toggle with `/toggle-stepfun`. StepFun shows its paid catalog by default because its catalog has no free models; set `stepfun_show_paid` or `STEPFUN_SHOW_PAID=false` to hide it.
+
+### FastRouter
+
+FastRouter is a native OpenAI-compatible provider with a public catalog. Pi restores its model store first and refreshes the catalog asynchronously; a key is required for chat requests but not model listing. Set `FASTROUTER_API_KEY` or `fastrouter_api_key`, then use `/toggle-fastrouter`.
+
+## Paid and trial providers
 
 ### ZenMux
 
-200+ models from OpenAI, Anthropic, Google, etc.
+Gateway for models from multiple upstream vendors. Requires an API key and available credits:
 
 ```bash
 export ZENMUX_API_KEY="..."
 ```
 
+Or set `zenmux_api_key`. Toggle with `/toggle-zenmux`.
+
 ### CrofAI
 
-OpenAI-compatible API with streaming and reasoning models.
+OpenAI-compatible provider requiring a CrofAI key and credits:
 
 ```bash
 export CROFAI_API_KEY="..."
 ```
 
+Or set `crofai_api_key`. Toggle with `/toggle-crofai`.
+
 ### DeepInfra
 
-$5 one-time trial credit, no credit card. ~5M tokens, expires after 90 days. 60 RPM.
+DeepInfra offers trial credits and paid inference. Its environment variable is intentionally `DEEPINFRA_TOKEN` (not `DEEPINFRA_API_KEY`):
 
 ```bash
 export DEEPINFRA_TOKEN="..."
 ```
 
-### Together AI
+Or set `deepinfra_api_key`. Toggle with `/toggle-deepinfra`; `/probe-deepinfra` checks availability.
 
-$1 one-time trial credit, no credit card. 200+ open-source models. 60 RPM.
+### Novita AI
 
-```bash
-export TOGETHER_AI_API_KEY="..."
-```
-
-### Novita
-
-100+ open-source models, OpenAI-compatible, 3 free models.
+OpenAI-compatible inference provider with free-tier and paid catalog entries:
 
 ```bash
 export NOVITA_API_KEY="..."
 ```
 
+Or set `novita_api_key`. Toggle with `/toggle-novita`; `/probe-novita` checks availability.
+
 ### Routeway
 
-OpenAI-compatible gateway with `:free` models.
+OpenAI-compatible gateway with free-tier model entries and paid models:
 
 ```bash
-export ROUTEWAY_API_KEY="sk-..."
+export ROUTEWAY_API_KEY="..."
 ```
 
-### b.ai
+Or set `routeway_api_key`. Toggle with `/toggle-routeway`; `/probe-routeway` checks availability.
 
-Paid provider.
+### OpenGateway
+
+[Gitlawb OpenGateway](https://gitlawb.com/opengateway) is an OpenAI-compatible gateway with smart routing, paid models, and changing promotional/free entries. Its base URL is `https://opengateway.gitlawb.com/v1`:
+
+```bash
+export OPENGATEWAY_API_KEY="ogw_live_..."
+```
+
+Or set `opengateway_api_key`. Toggle with `/toggle-opengateway`. The catalog is refreshed through Pi's native model lifecycle and includes the `auto` smart-routing model plus the models advertised by `/v1/models`. The gateway accepts the short `mimo-v2.5-pro` alias as well as its Xiaomi-qualified model ID.
+
+### B.AI
+
+B.AI is an OpenAI-compatible paid provider:
 
 ```bash
 export BAI_API_KEY="..."
 ```
 
----
+Or set `bai_api_key`. Toggle with `/toggle-bai`.
 
-## 🔧 Dynamic API Providers
+## Qoder (native)
 
-Fetched only when the corresponding API key is configured.
+Qoder has a basic Community/free tier and premium models that consume plan credits. Its static curated catalog is restored and persisted through Pi's native models-store lifecycle; the legacy cache is retained only for optional stream metadata.
 
-| Provider | Env Var | Config Key |
-|---|---|---|
-| Mistral | `MISTRAL_API_KEY` | `mistral_api_key` |
-| Groq | `GROQ_API_KEY` | `groq_api_key` |
-| Cerebras | `CEREBRAS_API_KEY` | `cerebras_api_key` |
-| xAI | `XAI_API_KEY` | `xai_api_key` |
-| Hugging Face | `HF_TOKEN` | `huggingface_api_key` |
-| OpenRouter | `OPENROUTER_API_KEY` | (uses Pi auth) |
-| FastRouter | always discovered | `fastrouter_api_key` |
+Authenticate with either method:
 
----
+```text
+/login qoder
+```
 
-## Built-in Pi Providers
+- Browser OAuth uses Qoder's device/PKCE flow.
+- PAT authentication can use `QODER_PERSONAL_ACCESS_TOKEN` or the alias `QODER_PAT`.
 
-These are now built into Pi — no extension needed:
+`/toggle-qoder` switches between basic and all Qoder models. Qoder's API remains OpenAI-compatible, while its authentication and custom stream integration remain Qoder-specific.
 
-- **Fireworks** — set `FIREWORKS_API_KEY`
-- **NVIDIA NIM** — set `NVIDIA_API_KEY`
+## Pi built-in providers
 
----
+### OpenRouter
 
-## Removing a Provider
+OpenRouter is Pi's built-in provider. Configure it using Pi's auth flow or:
 
-To remove a provider that is no longer working (e.g., free tier expired):
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+```
 
-1. Open an issue describing the problem
-2. The provider will be removed in the next release and noted in [CHANGELOG.md](../CHANGELOG.md)
+pi-free adds the `/toggle-openrouter` filter but does not own OpenRouter's catalog or credentials.
 
-See Naraya AI Router as an example — removed in v2.0.9 because their `/v1/*` gateway went down.
+### OpenCode and OpenCode Go
+
+These are Pi-built-in providers wrapped by pi-free for filtering. Pi owns their catalogs and credentials; pi-free does not perform startup discovery. Commands:
+
+```text
+/toggle-opencode
+/toggle-opencode-go
+```
+
+### Other Pi-built-in providers
+
+Pi owns the following providers; pi-free does not register duplicate catalogs or config keys for them: Fireworks, NVIDIA NIM, Mistral, Groq, Cerebras, xAI, Hugging Face, and Together. Use Pi's current documentation for their credentials, including `NVIDIA_API_KEY`, `MISTRAL_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `XAI_API_KEY`, `HF_TOKEN`, and `TOGETHER_API_KEY`.
+
+## Storage summary
+
+- Native providers: `~/.pi/agent/models-store.json` and Pi's `~/.pi/agent/auth.json`.
+- Legacy catalog cache: `~/.pi/provider-cache.json`.
+- Ollama compatibility data: `~/.pi/provider-cache.json` in addition to the native store.
+- Qoder's native static catalog is stored in Pi's model store; its optional stream metadata may use `~/.pi/agent/qoder-models-cache.json`.
