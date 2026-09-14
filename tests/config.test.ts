@@ -4,7 +4,7 @@
  * Covers key resolution priority (env var > file), show-paid flags,
  * hidden model filtering, and config persistence.
  *
- * Mocks node:fs to avoid touching real ~/.pi/free.json.
+ * Mocks node:fs to avoid touching real ~/.pi/agent/free.json.
  * The mock uses __mockData (a Map) as the virtual filesystem:
  *  - existsSync checks if path exists in the map
  *  - readFileSync reads from the map
@@ -43,7 +43,7 @@ vi.mock("node:fs", () => {
 
 function configPath(): string {
 	const home = process.env.HOME || process.env.USERPROFILE || "";
-	return join(home, ".pi", "free.json");
+	return join(home, ".pi", "agent", "free.json");
 }
 
 function parseMockJson(value: unknown): Record<string, unknown> {
@@ -70,6 +70,9 @@ function parseMockJson(value: unknown): Record<string, unknown> {
 // Fresh modules, env, and mock fs state for each test
 beforeEach(async () => {
 	vi.unstubAllEnvs();
+	// The pi harness may export PI_CODING_AGENT_DIR; neutralize it so the
+	// config path derives from the stubbed HOME instead of the real agent dir.
+	vi.stubEnv("PI_CODING_AGENT_DIR", "");
 	vi.resetModules();
 	// Clear the mock filesystem to prevent cross-contamination
 	const fs = await import("node:fs");

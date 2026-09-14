@@ -3,7 +3,7 @@
  *
  * Keys and flags are resolved in this order (first wins):
  *   1. Environment variable
- *   2. ~/.pi/free.json
+ *   2. ~/.pi/agent/free.json (Pi's agent dir, overridable via $PI_CODING_AGENT_DIR)
  *
  * All exported values are getter functions so that runtime changes
  * (e.g. after toggle-{provider}) are visible immediately.
@@ -17,7 +17,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	PROVIDER_ANYAPI,
 	PROVIDER_BAI,
@@ -54,7 +54,11 @@ export {
 	PROVIDER_TOKENROUTER,
 } from "./constants.ts";
 import { createLogger } from "./lib/logger.ts";
-import { ensureDir, PI_DATA_DIR } from "./lib/paths.ts";
+import {
+	ensureDir,
+	getPiAgentDir,
+	resolveSafeDataFile,
+} from "./lib/paths.ts";
 
 /**
  * JSON.parse reviver that strips prototype-pollution payloads.
@@ -157,7 +161,13 @@ const CONFIG_TEMPLATE: PiFreeConfig = {
 	qoder_show_paid: false,
 };
 
-const CONFIG_PATH = join(PI_DATA_DIR, "free.json");
+// Settings live in Pi's own agent directory (default: ~/.pi/agent).
+const AGENT_DIR = getPiAgentDir();
+const CONFIG_PATH = resolveSafeDataFile(
+	process.env.PI_FREE_CONFIG_FILE,
+	AGENT_DIR,
+	"free.json",
+);
 
 // Memoize the parsed config: re-read+parse only when the file's mtime changes.
 // loadConfigFile() is called on every config getter (dozens of times at
@@ -169,7 +179,7 @@ let cachedConfigMtime = -1;
 
 function ensureConfigFile(): void {
 	try {
-		ensureDir(PI_DATA_DIR);
+		ensureDir(dirname(CONFIG_PATH));
 		if (existsSync(CONFIG_PATH)) {
 			let existing: PiFreeConfig;
 			try {
@@ -223,7 +233,7 @@ function ensureConfigFile(): void {
 }
 
 /**
- * Restrict `~/.pi/free.json` to owner read/write (0600). The file may
+ * Restrict `~/.pi/agent/free.json` to owner read/write (0600). The file may
  * contain API keys for paid providers, so it must never be world-readable.
  * Best-effort: if chmod is not supported on the platform/filesystem,
  * log a warning and continue (the keys are still safe inside the user's
@@ -639,7 +649,7 @@ export function getOllamaApiKey(): string | undefined {
 }
 
 /**
- * Read an API key from ~/.pi/agent/auth.json.
+ * Read an API key from Pi's agent dir `auth.json`.
  * Pi stores built-in provider keys there (opencode, openrouter, etc.).
  * Falls back to env var if auth.json is missing or key not found.
  */
@@ -653,7 +663,7 @@ function readAuthJsonKey(
 
 	// Check auth.json
 	try {
-		const authPath = join(PI_DATA_DIR, "agent", "auth.json");
+		const authPath = join(AGENT_DIR, "auth.json");
 		if (!existsSync(authPath)) return undefined;
 		const raw = readFileSync(authPath, "utf8");
 		const auth = JSON.parse(raw, safeJsonReviver) as Record<
@@ -668,10 +678,7 @@ function readAuthJsonKey(
 	return undefined;
 }
 
-/**
- * OpenRouter key — pi's built-in provider reads from ~/.pi/agent/auth.json.
- * pi-free checks env var first, then auth.json.
- */
+/** OpenRouter key — pi's built-in provider reads it from the agent dir auth.json. */
 export function getOpenrouterApiKey(): string | undefined {
 	return readAuthJsonKey("openrouter", "OPENROUTER_API_KEY");
 }

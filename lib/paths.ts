@@ -1,10 +1,11 @@
 /**
- * Centralized path resolution for ~/.pi/ data files.
+ * Centralized path resolution for data files under a safe base directory.
  *
- * These helpers constrain file paths to the user's pi data directory
- * to prevent arbitrary-file-write vulnerabilities from attacker-controlled
- * environment variables. All env-var file overrides must resolve to a
- * path inside ~/.pi/ or be rejected.
+ * These helpers constrain file paths to a given base directory (normally
+ * the user's pi data directory) to prevent arbitrary-file-write
+ * vulnerabilities from attacker-controlled environment variables. All
+ * env-var file overrides must resolve to a path inside the base directory
+ * or be rejected.
  */
 
 import { existsSync, mkdirSync } from "node:fs";
@@ -28,6 +29,19 @@ function resolveHomeDir(): string {
 /** The user's pi data directory (~/.pi). */
 export const PI_DATA_DIR = join(resolveHomeDir(), ".pi");
 
+/**
+ * Pi's agent directory (default: ~/.pi/agent).
+ *
+ * Pi defines its agent dir via the PI_CODING_AGENT_DIR environment
+ * variable; if unset, it defaults to `.pi/agent` in the user's home
+ * directory.
+ */
+export function getPiAgentDir(): string {
+	return (
+		process.env.PI_CODING_AGENT_DIR || join(resolveHomeDir(), ".pi", "agent")
+	);
+}
+
 /** Maximum basename length for override env vars. */
 const MAX_BASENAME_LENGTH = 128;
 
@@ -45,7 +59,7 @@ export function ensureDir(dir: string): void {
 }
 
 /**
- * Resolve a file path from an env-var override, constrained to ~/.pi/.
+ * Resolve a file path from an env-var override, constrained to `baseDir`.
  *
  * The env var may override only the *filename* (not the directory).
  * If the env var is unset or empty, returns the default path.
@@ -53,20 +67,22 @@ export function ensureDir(dir: string): void {
  * is rejected and the default path is used.
  *
  * @param envValue - Raw env var value (may be undefined/empty)
- * @param defaultFilename - Default filename inside ~/.pi/
- * @returns A path string that is guaranteed to be inside ~/.pi/
+ * @param baseDir - Directory the result must stay inside
+ * @param defaultFilename - Default filename inside `baseDir`
+ * @returns A path string that is guaranteed to be inside `baseDir`
  */
 export function resolveSafeDataFile(
 	envValue: string | undefined,
+	baseDir: string,
 	defaultFilename: string,
 ): string {
 	if (!envValue) {
-		return join(PI_DATA_DIR, defaultFilename);
+		return join(baseDir, defaultFilename);
 	}
 
 	// Reject any path separator — only allow bare filenames
 	if (FORBIDDEN_CHARS_RE.test(envValue)) {
-		return join(PI_DATA_DIR, defaultFilename);
+		return join(baseDir, defaultFilename);
 	}
 
 	// Reject empty after trim, overly long, or suspicious filenames
@@ -77,13 +93,13 @@ export function resolveSafeDataFile(
 		trimmed === ".." ||
 		trimmed.length > MAX_BASENAME_LENGTH
 	) {
-		return join(PI_DATA_DIR, defaultFilename);
+		return join(baseDir, defaultFilename);
 	}
 
-	// Final safety check: resolve and verify the result is still inside PI_DATA_DIR
-	const candidate = resolve(join(PI_DATA_DIR, basename(trimmed)));
-	if (candidate !== PI_DATA_DIR && !candidate.startsWith(PI_DATA_DIR + sep)) {
-		return join(PI_DATA_DIR, defaultFilename);
+	// Final safety check: resolve and verify the result is still inside baseDir
+	const candidate = resolve(join(baseDir, basename(trimmed)));
+	if (candidate !== baseDir && !candidate.startsWith(baseDir + sep)) {
+		return join(baseDir, defaultFilename);
 	}
 
 	return candidate;

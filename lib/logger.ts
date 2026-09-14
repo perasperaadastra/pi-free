@@ -16,7 +16,11 @@ import {
 } from "node:fs";
 import { mkdir as mkdirAsync, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
-import { ensureDir, resolveSafeDataFile } from "./paths.ts";
+import {
+	ensureDir,
+	PI_DATA_DIR,
+	resolveSafeDataFile,
+} from "./paths.ts";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -76,7 +80,11 @@ function formatMessage(entry: LogEntry): string {
 	return `[${entry.timestamp}] [${entry.level.toUpperCase()}] [${sanitizeLogText(entry.namespace)}] ${sanitizeLogText(entry.message)}${data}`;
 }
 
-const LOG_PATH = resolveSafeDataFile(process.env.PI_FREE_LOG_PATH, "free.log");
+const LOG_PATH = resolveSafeDataFile(
+	process.env.PI_FREE_LOG_PATH,
+	PI_DATA_DIR,
+	"free.log",
+);
 const FILE_LOG_ENABLED = process.env.PI_FREE_FILE_LOG !== "false";
 const DEFAULT_MAX_LOG_BYTES = 10 * 1024 * 1024;
 const MAX_LOG_BYTES = parsePositiveInteger(
