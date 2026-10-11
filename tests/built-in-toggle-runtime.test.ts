@@ -48,7 +48,7 @@ it.each(["absent", "environment", "stored-go", "stored-free"])(
 		);
 		vi.stubEnv("OPENROUTER_API_KEY", undefined);
 		writeFileSync(
-			resolve(home, ".pi/free.json"),
+			resolve(agentDir, "free.json"),
 			JSON.stringify({ free_only: false }),
 		);
 		const auth = credential.startsWith("stored-")

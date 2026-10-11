@@ -7,7 +7,7 @@
 import type { Api } from "@earendil-works/pi-ai/compat";
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { createJSONStore } from "./json-persistence.ts";
-import { resolveSafeDataFile } from "./paths.ts";
+import { PI_DATA_DIR, resolveSafeDataFile } from "./paths.ts";
 
 export interface SyncCacheProviderEntry {
 	baseUrl: string;
@@ -24,6 +24,7 @@ function store() {
 	return createJSONStore<SyncCacheFile>(
 		resolveSafeDataFile(
 			process.env.PI_FREE_OPENCODE_CACHE_FILE,
+			PI_DATA_DIR,
 			"opencode-catalog-cache.json",
 		),
 		{ savedAt: "", providers: {} },

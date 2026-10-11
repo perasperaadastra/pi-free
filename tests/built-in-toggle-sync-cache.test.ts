@@ -29,12 +29,16 @@ beforeEach(() => {
 	home = mkdtempSync(join(tmpdir(), "pi-free-sync-cache-"));
 	process.env.HOME = home;
 	process.env.USERPROFILE = home;
+	// The pi harness may export OPENCODE_API_KEY=public; neutralize it so the
+	// sentinel does not register opencode-go with 0 models in these tests.
+	process.env.OPENCODE_API_KEY = "test-key";
 	vi.resetModules();
 });
 
 afterEach(() => {
 	delete process.env.HOME;
 	delete process.env.USERPROFILE;
+	delete process.env.OPENCODE_API_KEY;
 	rmSync(home, { recursive: true, force: true });
 });
 

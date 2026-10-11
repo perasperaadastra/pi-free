@@ -49,13 +49,16 @@ vi.mock("node:fs", () => {
 
 function configPath(): string {
 	const home = process.env.HOME || process.env.USERPROFILE || "";
-	return join(home, ".pi", "free.json");
+	return join(home, ".pi", "agent", "free.json");
 }
 
 describe("atomic toggle resolves from the locked read (#603)", () => {
 	beforeEach(() => {
 		vi.resetModules();
 		vi.stubEnv("HOME", "/tmp");
+		// The pi harness may export PI_CODING_AGENT_DIR; neutralize it so the
+		// config path derives from the stubbed HOME instead of the real agent dir.
+		vi.stubEnv("PI_CODING_AGENT_DIR", "");
 	});
 
 	it("flips from the on-disk state even when the memo is stale", async () => {
