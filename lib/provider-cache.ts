@@ -11,7 +11,7 @@
 
 import { createJSONStore } from "./json-persistence.ts";
 import { createLogger } from "./logger.ts";
-import { resolveSafeDataFile } from "./paths.ts";
+import { PI_DATA_DIR, resolveSafeDataFile } from "./paths.ts";
 import { recordCacheHit } from "./startup-timing.ts";
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
@@ -40,6 +40,7 @@ interface CacheData {
 
 const CACHE_FILE = resolveSafeDataFile(
 	process.env.PI_FREE_PROVIDER_CACHE,
+	PI_DATA_DIR,
 	"provider-cache.json",
 );
 

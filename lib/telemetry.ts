@@ -8,7 +8,7 @@
  */
 
 import { createLogger } from "./logger.ts";
-import { resolveSafeDataFile } from "./paths.ts";
+import { PI_DATA_DIR, resolveSafeDataFile } from "./paths.ts";
 import { createJSONStore } from "./json-persistence.ts";
 import type {
 	PiAiResolutionEvent,
@@ -125,6 +125,7 @@ export interface PiAiEntryDiagnostics {
 
 const TELEMETRY_FILE = resolveSafeDataFile(
 	process.env.PI_FREE_TELEMETRY_FILE,
+	PI_DATA_DIR,
 	"free-telemetry.json",
 );
 const MAX_RECENT_CALLS = 50;

@@ -8,7 +8,7 @@
  * statSync and so never exercises the memoization fast-path).
  *
  * Note: importing ../config.ts runs ensureConfigFile() at module top-level,
- * which creates/merges ~/.pi/free.json. Tests therefore import first, then
+ * which creates/merges ~/.pi/agent/free.json. Tests therefore import first, then
  * control the file's content + mtime explicitly before/after the calls.
  */
 
@@ -26,12 +26,15 @@ import { join } from "node:path";
 
 const tempHome = mkdtempSync(join(tmpdir(), "pi-free-config-memo-test-"));
 const tempPiDir = join(tempHome, ".pi");
-const tempConfigPath = join(tempPiDir, "free.json");
+const tempConfigPath = join(tempPiDir, "agent", "free.json");
 
 beforeEach(() => {
 	// Point HOME at the temp dir so PI_DATA_DIR (= ~/.pi) resolves inside it.
 	process.env.HOME = tempHome;
 	process.env.USERPROFILE = tempHome;
+	// The pi harness may export PI_CODING_AGENT_DIR; neutralize it so the
+	// config path derives from the temp HOME instead of the real agent dir.
+	process.env.PI_CODING_AGENT_DIR = "";
 	if (!existsSync(tempPiDir)) mkdirSync(tempPiDir, { recursive: true });
 	// Fresh module instance → resets the module-level cachedConfig cache.
 	vi.resetModules();
@@ -40,6 +43,7 @@ beforeEach(() => {
 afterEach(() => {
 	delete process.env.HOME;
 	delete process.env.USERPROFILE;
+	delete process.env.PI_CODING_AGENT_DIR;
 });
 
 describe("loadConfigFile mtime memoization", () => {
