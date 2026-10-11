@@ -133,6 +133,17 @@ export const KILO_POLL_INTERVAL_MS = 3_000;
 export const KILO_TOKEN_EXPIRATION_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
 
 // =============================================================================
+// Sentinel values
+// =============================================================================
+
+/**
+ * When OPENCODE_API_KEY is set to this literal value, the opencode-go provider
+ * is skipped entirely (not discovered, not registered). The opencode (non-Go)
+ * variant still works normally since it shares the same env var.
+ */
+export const OPENCODE_API_KEY_SENTINEL_DISABLE_GO = "public";
+
+// =============================================================================
 // Removed providers (now built into pi):
 // - openrouter: use pi's built-in with OPENROUTER_API_KEY
 // - zen/opencode: use pi's built-in with OPENCODE_API_KEY

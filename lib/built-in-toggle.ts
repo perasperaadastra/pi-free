@@ -20,7 +20,10 @@ import type {
 	ExtensionAPI,
 	ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
-import { PROVIDER_OPENCODE_FREE } from "../constants.ts";
+import {
+	OPENCODE_API_KEY_SENTINEL_DISABLE_GO,
+	PROVIDER_OPENCODE_FREE,
+} from "../constants.ts";
 import { getOpencodeApiKey, toggleModelViewOverride } from "../config.ts";
 import { isChatModel, isChatModelConfig } from "./types.ts";
 import { recordAction } from "./action-log.ts";
@@ -298,10 +301,36 @@ function trySyncCacheRegistration(
 }
 
 export function setupBuiltInProviderToggles(pi: ExtensionAPI): void {
+	// When OPENCODE_API_KEY=public, override Pi's built-in opencode-go with
+	// zero models so it disappears from the model picker. This handles the
+	// case where the dynamic-built-in path didn't run (e.g. import error).
+	if (getOpencodeApiKey() === OPENCODE_API_KEY_SENTINEL_DISABLE_GO) {
+		pi.registerProvider("opencode-go", {
+			baseUrl: "https://opencode.ai/zen/go/v1",
+			apiKey: OPENCODE_API_KEY_SENTINEL_DISABLE_GO,
+			api: OPENCODE_DYNAMIC_API,
+			streamSimple: createOpenCodeStreamSimple(getOpenCodeSession()),
+			models: [],
+		});
+		_logger.info(
+			"[built-in-toggle] opencode-go: disabled because OPENCODE_API_KEY=public (registered with 0 models)",
+		);
+	}
+
 	const activeConfigs = BUILT_IN_TOGGLE_PROVIDERS.filter(
 		(config) =>
 			!getProviderRegistry().has(config.id) || providerStates.has(config.id),
-	);
+	).filter((config) => {
+		// Skip opencode-go when OPENCODE_API_KEY=public sentinel is used.
+		// (early registration above already handles this; safety net)
+		if (
+			config.id === "opencode-go" &&
+			getOpencodeApiKey() === OPENCODE_API_KEY_SENTINEL_DISABLE_GO
+		) {
+			return false;
+		}
+		return true;
+	});
 
 	if (activeConfigs.length === 0) {
 		_logger.info(
