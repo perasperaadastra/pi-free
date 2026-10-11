@@ -1,12 +1,24 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const tempHome = "C:/tmp/pi-free-health-test";
+const tempHome = mkdtempSync(join(tmpdir(), "pi-free-health-test-"));
 
 beforeEach(async () => {
 	process.env.HOME = tempHome;
 	process.env.USERPROFILE = tempHome;
 	const { beginStartup } = await import("../lib/startup-timing.ts");
 	beginStartup();
+});
+
+afterEach(() => {
+	delete process.env.HOME;
+	delete process.env.USERPROFILE;
+});
+
+afterAll(() => {
+	rmSync(tempHome, { recursive: true, force: true });
 });
 
 describe("health report", () => {
