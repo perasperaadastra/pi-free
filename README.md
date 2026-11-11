@@ -68,7 +68,7 @@ Qoder supports `/login qoder` with PAT or browser OAuth, then `/toggle-qoder` sw
 
 ### Add API keys (optional)
 
-First run creates `~/.pi/free.json`. Add extension-provider keys there or use the environment variables documented in [Provider catalog & auth](docs/providers.md). For example:
+First run creates `~/.pi/agent/free.json` (Pi's agent dir — `$PI_CODING_AGENT_DIR` when set). Add extension-provider keys there or use the environment variables documented in [Provider catalog & auth](docs/providers.md). For example:
 
 ```json
 {
@@ -83,11 +83,11 @@ When enabled and the current free model errors, pi-free automatically switches t
 
 Three commands:
 
-- `/toggle-auto-fallback` — on/off switch (persists in `~/.pi/free.json`).
+- `/toggle-auto-fallback` — on/off switch (persists in `~/.pi/agent/free.json`).
 - `/free-fallback-history` — list of session switches + current blacklist.
 - `/reset-fallback-blacklist` — clear the in-memory blacklist (escape hatch after an exhaustion).
 
-Configuration (`~/.pi/free.json`, all optional, defaults shown):
+Configuration (`~/.pi/agent/free.json`, all optional, defaults shown):
 
 ```jsonc
 {
@@ -128,7 +128,7 @@ Point-in-time verification of free/paid classification against every provider's 
 
 ### Catalog and credential storage
 
-Native providers use Pi's `~/.pi/agent/models-store.json` and `~/.pi/agent/auth.json`. Qoder's static catalog is persisted in the native model store; it retains its legacy cache only for optional stream metadata. Ollama Cloud retains `~/.pi/provider-cache.json` only for capability reuse and its compatibility refresh command. `/free-startup` also reports per-provider fetch attempts and post-start session work.
+Native providers use Pi's `~/.pi/agent/models-store.json` and `~/.pi/agent/auth.json`. Qoder's static catalog is persisted in the native model store; it retains its legacy cache only for optional stream metadata. Ollama Cloud retains `~/.pi/agent/provider-cache.json` only for capability reuse and its compatibility refresh command. `/free-startup` also reports per-provider fetch attempts and post-start session work.
 
 ### Startup packaging
 

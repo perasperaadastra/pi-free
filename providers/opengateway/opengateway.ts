@@ -7,7 +7,7 @@
  *
  * Setup:
  *   OPENGATEWAY_API_KEY=ogw_live_...
- *   # or add opengateway_api_key to ~/.pi/free.json
+ *   # or add opengateway_api_key to ~/.pi/agent/free.json
  */
 
 import type {

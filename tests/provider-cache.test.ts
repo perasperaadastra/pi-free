@@ -1,15 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const tempDir = mkdtempSync(join(tmpdir(), "pi-free-provider-cache-test-"));
+/** PI_DATA_DIR is `<home>/.pi/agent`, so that is where the cache lands. */
+const cacheDir = join(tempDir, ".pi", "agent");
+const cacheFile = join(cacheDir, "provider-cache.json");
 
 describe("provider cache", () => {
 	beforeEach(() => {
-		if (existsSync(join(tempDir, "provider-cache.json"))) {
-			unlinkSync(join(tempDir, "provider-cache.json"));
+		if (existsSync(cacheFile)) {
+			unlinkSync(cacheFile);
 		}
+		mkdirSync(cacheDir, { recursive: true });
 		// Point HOME at the temp dir so PI_DATA_DIR resolves inside it.
 		process.env.HOME = tempDir;
 		process.env.USERPROFILE = tempDir;
@@ -69,7 +79,7 @@ describe("provider cache", () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 		writeFileSync(
-			join(tempDir, "provider-cache.json"),
+			cacheFile,
 			JSON.stringify({
 				providers: {
 					invalid: {

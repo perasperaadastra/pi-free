@@ -374,7 +374,7 @@ describe("built-in provider toggles", () => {
 
 		// A thrown fetch error is what makes Pi warn "Could not refresh
 		// opencode-free; showing cached models" — cached models are exactly what
-		// we keep, so the failure must stay in ~/.pi/free.log (#504).
+		// we keep, so the failure must stay in ~/.pi/agent/free.log (#504).
 		await expect(
 			registered.refreshModels?.({
 				allowNetwork: true,

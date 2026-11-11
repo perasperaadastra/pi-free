@@ -9,7 +9,7 @@
  *
  * Setup:
  *   GMI_API_KEY=...
- *   # or add gmi_api_key to ~/.pi/free.json
+ *   # or add gmi_api_key to ~/.pi/agent/free.json
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

@@ -153,7 +153,7 @@ describe("logger file rotation", () => {
 			}
 			await waitForLogFlush();
 
-			const logDir = join(home, ".pi");
+			const logDir = join(home, ".pi", "agent");
 			// Async rotation may still be renaming files right after the flush;
 			// wait for the directory listing to stabilize so the size/content
 			// assertions never race a mid-check rename (ENOENT flake). The

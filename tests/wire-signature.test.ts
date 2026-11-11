@@ -42,7 +42,7 @@ describe("wire-signature logging (M3, #437)", () => {
 		);
 
 		// The log line must never contain header VALUES (secrets stay out of
-		// the shared ~/.pi/free.log).
+		// the shared ~/.pi/agent/free.log).
 		const serialized = JSON.stringify(data);
 		expect(serialized).not.toContain("super-secret-task-id");
 		expect(serialized).not.toContain("workos:very-secret-token");

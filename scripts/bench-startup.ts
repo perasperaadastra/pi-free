@@ -19,8 +19,8 @@
  *   npm run build && npx tsx scripts/bench-startup.ts warm compiled
  *
  * Modes:
- *   warm     - Sandbox seeded with your real ~/.pi/provider-cache.json (timestamps
- *              freshened to "now") and ~/.pi/free.json, so every configured
+ *   warm     - Sandbox seeded with your real ~/.pi/agent/provider-cache.json (timestamps
+ *              freshened to "now") and ~/.pi/agent/free.json, so every configured
  *              provider that still uses the disk cache registers with ZERO network.
  *              Kilo and Cline now use the native models store instead: after the
  *              factory the bench seeds an in-memory store (Pi's real one lives at
@@ -78,17 +78,22 @@ if (
 
 // Capture the REAL home before we override HOME/USERPROFILE for the sandbox.
 const REAL_HOME = process.env.USERPROFILE || process.env.HOME || homedir();
-const REAL_PI = join(REAL_HOME, ".pi");
+// pi-free data lives in Pi's agent dir (PI_CODING_AGENT_DIR, else ~/.pi/agent).
+const REAL_PI =
+	process.env.PI_CODING_AGENT_DIR || join(REAL_HOME, ".pi", "agent");
 
 // ---------------------------------------------------------------------------
 // Sandboxed HOME so we never touch the user's real ~/.pi state. Cleaned up on
 // exit (best-effort).
 // ---------------------------------------------------------------------------
 const sandbox = mkdtempSync(join(tmpdir(), "pifree-bench-"));
-const piDir = join(sandbox, ".pi");
+const piDir = join(sandbox, ".pi", "agent");
 mkdirSync(piDir, { recursive: true });
 process.env.HOME = sandbox;
 process.env.USERPROFILE = sandbox;
+// Derived from the real home above; leaving it set would point the extension's
+// data dir back at the developer's machine instead of the sandbox.
+delete process.env.PI_CODING_AGENT_DIR;
 
 function cleanup(): void {
 	try {

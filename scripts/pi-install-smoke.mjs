@@ -103,11 +103,14 @@ const rpcToggleDriver = join(scriptDir, "rpc-toggle-check.mjs");
 const rpcRestoreDriver = join(scriptDir, "rpc-restore-check.mjs");
 const piOptions = { cwd: project, env: environment, stdio: "inherit" };
 
+/** pi-free keeps config and log in Pi's agent dir (`<home>/.pi/agent`). */
+const agentDir = join(home, ".pi", "agent");
+
 // Seed an explicit free_only default so the session check's filter
 // assertions do not depend on template defaults (deterministic input).
-mkdirSync(join(home, ".pi"), { recursive: true });
+mkdirSync(agentDir, { recursive: true });
 writeFileSync(
-	join(home, ".pi", "free.json"),
+	join(agentDir, "free.json"),
 	JSON.stringify({ free_only: true }, null, 2),
 );
 
@@ -149,7 +152,7 @@ function preserveArtifacts(label) {
 		);
 		mkdirSync(dir, { recursive: true });
 		for (const file of ["free.log", "free.json"]) {
-			const src = join(home, ".pi", file);
+			const src = join(home, ".pi", "agent", file);
 			if (existsSync(src)) copyFileSync(src, join(dir, file));
 		}
 		console.log(`Preserved smoke artifacts in ${dir}`);

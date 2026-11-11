@@ -174,7 +174,7 @@ function preserveArtifacts(label) {
 		);
 		mkdirSync(dir, { recursive: true });
 		for (const file of ["free.log", "free.json"]) {
-			const src = join(home, ".pi", file);
+			const src = join(home, ".pi", "agent", file);
 			if (existsSync(src)) copyFileSync(src, join(dir, file));
 		}
 		console.log(`Preserved smoke artifacts in ${dir}`);

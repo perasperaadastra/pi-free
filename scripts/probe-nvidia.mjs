@@ -14,11 +14,15 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+// Same resolution as lib/paths.ts: PI_CODING_AGENT_DIR, else ~/.pi/agent.
+const AGENT_DIR =
+	process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+
 function getApiKey() {
 	if (process.env.NVIDIA_API_KEY) return process.env.NVIDIA_API_KEY;
 	try {
 		const config = JSON.parse(
-			readFileSync(join(homedir(), ".pi", "free.json"), "utf8"),
+			readFileSync(join(AGENT_DIR, "free.json"), "utf8"),
 		);
 		if (config.nvidia_api_key) return config.nvidia_api_key;
 	} catch {}
@@ -28,7 +32,7 @@ function getApiKey() {
 const API_KEY = getApiKey();
 if (!API_KEY) {
 	console.error(
-		"NVIDIA_API_KEY not found. Set env var or add nvidia_api_key to ~/.pi/free.json",
+		"NVIDIA_API_KEY not found. Set env var or add nvidia_api_key to ~/.pi/agent/free.json",
 	);
 	process.exit(1);
 }

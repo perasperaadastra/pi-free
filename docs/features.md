@@ -22,7 +22,7 @@ Most pi-free providers now use Pi's native `registerProvider(provider)` surface.
 - retain the previous catalog after an empty or failed refresh; and
 - keep their complete catalog in memory while Pi applies the current free/all filter.
 
-FastRouter and Qoder now use the native provider lifecycle alongside the other migrated providers. Pi owns the OpenCode, OpenCode Go, and OpenRouter built-in catalogs. The `opencode-free` wrapper captures Pi's built-in metadata, then performs one detached `GET /zen/v1/models` refresh after session start so new or retired Zen models are reflected without delaying Pi startup; the `opencode-go` wrapper does the same against the Go tier's public `GET /zen/go/v1/models` endpoint, so Go models OpenCode ships between Pi releases are not stuck on Pi's build-time snapshot. The `openrouter` wrapper does the same against the public `GET /api/v1/models` endpoint: known model IDs keep Pi's curated metadata, while models that are new since Pi's release are synthesized from the endpoint's pricing, context-window, modality, and reasoning data. All three refreshes are detached, deduplicated per process, and never block session start; a failed or empty fetch retains the cached catalog and is written to `~/.pi/free.log` instead of rethrowing into Pi's `Could not refresh …; showing cached models` warning. See [configuration](configuration.md#model-stores-and-caches) for cache locations, including Ollama Cloud's intentional compatibility-cache exception.
+FastRouter and Qoder now use the native provider lifecycle alongside the other migrated providers. Pi owns the OpenCode, OpenCode Go, and OpenRouter built-in catalogs. The `opencode-free` wrapper captures Pi's built-in metadata, then performs one detached `GET /zen/v1/models` refresh after session start so new or retired Zen models are reflected without delaying Pi startup; the `opencode-go` wrapper does the same against the Go tier's public `GET /zen/go/v1/models` endpoint, so Go models OpenCode ships between Pi releases are not stuck on Pi's build-time snapshot. The `openrouter` wrapper does the same against the public `GET /api/v1/models` endpoint: known model IDs keep Pi's curated metadata, while models that are new since Pi's release are synthesized from the endpoint's pricing, context-window, modality, and reasoning data. All three refreshes are detached, deduplicated per process, and never block session start; a failed or empty fetch retains the cached catalog and is written to `~/.pi/agent/free.log` instead of rethrowing into Pi's `Could not refresh …; showing cached models` warning. See [configuration](configuration.md#model-stores-and-caches) for cache locations, including Ollama Cloud's intentional compatibility-cache exception.
 
 ## `glob` tool and OpenCode Zen free-tier compatibility
 
@@ -39,7 +39,7 @@ The `glob` tool is registered for every session but only selected on `opencode-f
 
 Where a model matches the benchmark catalog, pi-free appends a Coding Index score such as `CI: 52.3` to its display name. Matching uses direct, alias, provider-normalization, and prefix-fallback strategies. Missing scores are not fabricated.
 
-Set `PI_FREE_BENCHMARK_DEBUG=1` to record match diagnostics in `~/.pi/free.log` under the `benchmark-lookup` namespace.
+Set `PI_FREE_BENCHMARK_DEBUG=1` to record match diagnostics in `~/.pi/agent/free.log` under the `benchmark-lookup` namespace.
 
 ## Model availability probing
 
@@ -48,7 +48,7 @@ Some providers list models that are unavailable at request time. pi-free provide
 - native availability probes cover Ollama Cloud, Routeway, DeepInfra, SambaNova, and Novita;
 - probes use a 24-hour result cache for automatic checks, while explicit commands force a fresh check.
 
-Deterministically broken models are hidden in `~/.pi/free.json` using provider-scoped IDs. Transient network failures are not treated as proof that a model is broken.
+Deterministically broken models are hidden in `~/.pi/agent/free.json` using provider-scoped IDs. Transient network failures are not treated as proof that a model is broken.
 
 See [Commands](commands.md#probe-commands) for the command list.
 
@@ -56,7 +56,7 @@ See [Commands](commands.md#probe-commands) for the command list.
 
 - `/toggle-{provider}` switches an individual provider between its free/basic view and full catalog.
 - `/toggle-free` changes the global free-only mode.
-- Preferences persist in `~/.pi/free.json`.
+- Preferences persist in `~/.pi/agent/free.json`.
 - Native providers re-register the same provider object to invalidate Pi's model snapshot; all pi-free providers now use this native invalidation path.
 
 ## Optional telemetry
@@ -70,7 +70,7 @@ Telemetry is local and opt-in through actual use of free models. It records aggr
 
 ## Startup observability
 
-`/free-startup` reports the latest extension startup timing, including provider setup durations, per-provider cache/network activity, failed network attempts, session-start handler durations, detached post-handler work, and failures. `/pi-free-health` adds a credential-free status summary, registered-provider count, problem list, and the path to `~/.pi/free.log` (or the configured log path). Legacy startup model fetches have an 8-second default deadline, configurable with `PI_FREE_STARTUP_FETCH_TIMEOUT_MS`; native provider refresh is handled by Pi after registration and its session-start nudge is measured without blocking the event.
+`/free-startup` reports the latest extension startup timing, including provider setup durations, per-provider cache/network activity, failed network attempts, session-start handler durations, detached post-handler work, and failures. `/pi-free-health` adds a credential-free status summary, registered-provider count, problem list, and the path to `free.log` in Pi's agent dir (or the configured log path). Legacy startup model fetches have an 8-second default deadline, configurable with `PI_FREE_STARTUP_FETCH_TIMEOUT_MS`; native provider refresh is handled by Pi after registration and its session-start nudge is measured without blocking the event.
 
 For reproducible import-inclusive measurements, run `npx tsx scripts/bench-startup.ts <warm|cold|fastcold>`. The benchmark reports `importMs` (tsx loader/transpilation and module-graph initialization, not pure compiler time and outside pi-free's runtime log), `factoryMs` (the awaited factory measured by runtime startup timing), and `totalMs` (import plus factory) in both its human summary and `RESULT` JSON. Native offline-init checks are reported separately.
 

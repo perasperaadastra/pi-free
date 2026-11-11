@@ -25,7 +25,7 @@
  *
  * Setup:
  *   MERGE_API_KEY=mg_...
- *   # or add merge_api_key to ~/.pi/free.json
+ *   # or add merge_api_key to ~/.pi/agent/free.json
  *
  * Usage:
  *   pi install git:github.com/apmantza/pi-free

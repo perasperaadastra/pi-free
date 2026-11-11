@@ -16,7 +16,7 @@
  *
  * Setup:
  *   ORCAROUTER_API_KEY=sk-orca-...
- *   # or add orcarouter_api_key to ~/.pi/free.json
+ *   # or add orcarouter_api_key to ~/.pi/agent/free.json
  */
 
 import type {

@@ -29,7 +29,7 @@ const tempPiDir = join(tempHome, ".pi");
 const tempConfigPath = join(tempPiDir, "agent", "free.json");
 
 beforeEach(() => {
-	// Point HOME at the temp dir so PI_DATA_DIR (= ~/.pi) resolves inside it.
+	// Point HOME at the temp dir so PI_DATA_DIR (= the agent dir) resolves inside it.
 	process.env.HOME = tempHome;
 	process.env.USERPROFILE = tempHome;
 	// The pi harness may export PI_CODING_AGENT_DIR; neutralize it so the

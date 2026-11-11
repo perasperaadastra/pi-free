@@ -1,8 +1,12 @@
 # Configuration & Logging
 
+## Data directory
+
+pi-free keeps its config, log, telemetry, and caches in Pi's agent dir: `$PI_CODING_AGENT_DIR` when set, otherwise `~/.pi/agent` (`%USERPROFILE%\.pi\agent` on Windows). That is the same directory that holds Pi's own `auth.json` and `models-store.json`. File paths below are relative to it.
+
 ## Config file
 
-pi-free reads `~/.pi/free.json` and creates it on first run. For values supported by both mechanisms, environment variables take precedence over the file.
+pi-free reads `free.json` there and creates it on first run. For values supported by both mechanisms, environment variables take precedence over the file.
 
 ### API keys
 
@@ -94,10 +98,10 @@ Migrated native providers restore and persist catalogs through Pi's model lifecy
 
 Native providers use Pi's model store; Qoder retains its separate cache only for optional stream metadata:
 
-- `~/.pi/agent/qoder-models-cache.json` — Qoder stream metadata compatibility cache.
-- `~/.pi/provider-cache.json` — retained by native Ollama Cloud only for `/api/show` capability reuse and `/ollama-cloud-refresh` compatibility.
+- `qoder-models-cache.json` — Qoder stream metadata compatibility cache.
+- `provider-cache.json` — retained by native Ollama Cloud only for `/api/show` capability reuse and `/ollama-cloud-refresh` compatibility.
 
-Ollama Cloud is native but intentionally retains `~/.pi/provider-cache.json` for `/api/show` capability reuse and `/ollama-cloud-refresh`. This does not replace its Pi native model store.
+Ollama Cloud is native but intentionally retains `provider-cache.json` for `/api/show` capability reuse and `/ollama-cloud-refresh`. This does not replace its Pi native model store.
 
 Native providers restore the store first and Pi controls online refresh throttling. A native provider's refresh retains the previous catalog when a fetch is empty or fails. Legacy startup fetches are bounded by the 8-second default `PI_FREE_STARTUP_FETCH_TIMEOUT_MS` deadline and fall back to stale cache where available.
 
@@ -105,8 +109,7 @@ Native providers restore the store first and Pi controls online refresh throttli
 
 ### Extension log
 
-- **Windows:** `%USERPROFILE%\.pi\free.log`
-- **Linux/macOS:** `~/.pi/free.log`
+`free.log` in the [data directory](#data-directory), plus `free.log.1` through `.3` rotated backups.
 
 Provider startup messages and configuration errors are written here.
 
@@ -114,8 +117,7 @@ Provider startup messages and configuration errors are written here.
 
 Coding Index match diagnostics (attempt/match/miss per model) are written to the shared extension log under the `benchmark-lookup` namespace:
 
-- **Windows:** `%USERPROFILE%\.pi\free.log`
-- **Linux/macOS:** `~/.pi/free.log`
+`free.log` in the [data directory](#data-directory).
 
 Diagnostics are opt-in (one line per model per match attempt, so off by default for startup speed):
 
@@ -131,22 +133,26 @@ PI_FREE_LOG_LEVEL=debug
 PI_FREE_LOG_PATH=custom-free.log
 PI_FREE_LOG_MAX_BYTES=10485760
 PI_FREE_FILE_LOG=false
-PI_FREE_PROVIDER_CACHE=/tmp/provider-cache.json
-PI_FREE_TELEMETRY_FILE=/tmp/free-telemetry.json
+PI_FREE_PROVIDER_CACHE=custom-provider-cache.json
+PI_FREE_TELEMETRY_FILE=custom-free-telemetry.json
 ```
 
-The telemetry file defaults to `~/.pi/free-telemetry.json`. `free.log` rotates asynchronously at the configured size (10 MiB by default) and keeps three backups (`free.log.1` through `.3`). Rotation and the initial log-file check are lazy and do not block extension startup. `PI_FREE_LOG_PATH` accepts a filename within `~/.pi`; it does not accept an arbitrary directory path.
+The telemetry file defaults to `free-telemetry.json` in the [data directory](#data-directory). `free.log` rotates asynchronously at the configured size (10 MiB by default) and keeps three backups (`free.log.1` through `.3`). Rotation and the initial log-file check are lazy and do not block extension startup. The file-override variables (`PI_FREE_LOG_PATH`, `PI_FREE_PROVIDER_CACHE`, `PI_FREE_TELEMETRY_FILE`, `PI_FREE_CONFIG_FILE`) accept a bare filename inside the data directory; path separators are rejected and the default is used instead.
 
 The telemetry file carries a second, additive section: `diagnostics.piAi`, one record per session, holding what the install resolved — the bare-specifier pi-ai copy (`fastPathRoot`/`fastPathVersion`), its per-entry export coverage, the entry-aware resolution per allow-listed entry, whether `dist/vendor` is present, and the session's fast-path failures with how each recovered. It is written at `session_start` and refreshed by `/pi-free-health`, flushed immediately (Pi calls `process.exit(0)` right after startup, so a debounced write would be lost). Files written before this section existed simply lack the key; their model data still parses. `/clear-free-telemetry` removes it with everything else.
 
 ## File locations
 
+All paths are relative to the [data directory](#data-directory).
+
 | File | Purpose |
 | --- | --- |
-| `~/.pi/free.json` | pi-free config, flags, and extension-provider keys |
-| `~/.pi/free.log` and `.1`–`.3` | Rotating extension log (includes opt-in `benchmark-lookup` diagnostics) |
-| `~/.pi/free-telemetry.json` | Local model performance telemetry, plus one pi-ai resolution diagnostics record per session |
-| `~/.pi/provider-cache.json` | Legacy cache and Ollama compatibility data |
-| `~/.pi/agent/models-store.json` | Pi native provider catalogs |
-| `~/.pi/agent/auth.json` | Pi native credentials and Qoder credentials |
-| `~/.pi/agent/qoder-models-cache.json` | Qoder optional stream metadata cache |
+| `free.json` | pi-free config, flags, and extension-provider keys |
+| `free.log` and `.1`–`.3` | Rotating extension log (includes opt-in `benchmark-lookup` diagnostics) |
+| `free-telemetry.json` | Local model performance telemetry, plus one pi-ai resolution diagnostics record per session |
+| `provider-cache.json` | Legacy cache and Ollama compatibility data |
+| `probe-cache.json` | Model probe results (24-hour TTL) |
+| `opencode-catalog-cache.json` | OpenCode free/Go catalog sync cache |
+| `models-store.json` | Pi native provider catalogs |
+| `auth.json` | Pi native credentials and Qoder credentials |
+| `qoder-models-cache.json` | Qoder optional stream metadata cache |

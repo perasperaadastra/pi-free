@@ -10,7 +10,7 @@
  *     settle — agent_settled means no further automatic retry will run)
  *   - early-returns when free-only is off (Q2)
  *
- * Mocks the registry + config so we don't touch the user's ~/.pi/free.json.
+ * Mocks the registry + config so we don't touch the user's ~/.pi/agent/free.json.
  */
 
 // Mock config + registry so the test can run without disk I/O.

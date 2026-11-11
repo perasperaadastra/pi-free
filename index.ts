@@ -431,7 +431,7 @@ function setupTelemetry(pi: ExtensionAPI) {
 		// M3 (#437): wire-signature debug log — the request contract pi-free
 		// hands pi-ai at agent start. REDACTION RULE: header NAMES only, never
 		// values — an Authorization/apiKey/token value in this line would leak
-		// credentials into the shared ~/.pi/free.log. Debug-only so normal runs
+		// credentials into the shared ~/.pi/agent/free.log. Debug-only so normal runs
 		// don't spam the log.
 		logWireSignature(ctx.model, (providerId) =>
 			ctx.modelRegistry?.getProvider?.(providerId),

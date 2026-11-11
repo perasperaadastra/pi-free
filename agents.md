@@ -37,7 +37,7 @@ index.ts                          ← Extension entry (piFreeEntry)
   ├─ lib/startup-timing.ts        ← startup/session-start timing
   ├─ lib/session-start-metrics.ts ← handler + detached-task timing
   ├─ lib/health.ts                ← /pi-free-health report (credential-free)
-  ├─ lib/logger.ts                ← structured logging (console + ~/.pi/free.log)
+  ├─ lib/logger.ts                ← structured logging (console + free.log in the agent dir)
   ├─ lib/json-persistence.ts      ← JSON/JSONL stores
   ├─ lib/pi-ai-loader.ts          ← runtime pi-ai loader (bare → on-disk → vendored)
   ├─ lib/model-detection.ts       ← model family grouping
@@ -62,7 +62,7 @@ index.ts                          ← Extension entry (piFreeEntry)
   │   ├─ commands.ts              ← fallback slash commands
   │   └─ config.ts                ← auto_fallback_*/fallback_* accessors (env > file)
   │
-  ├─ config.ts                    ← ~/.pi/free.json + env var resolution (ALL config lives here)
+  ├─ config.ts                    ← free.json in the agent dir + env var resolution (ALL config lives here)
   ├─ constants.ts                 ← Provider IDs, base URLs, timeouts, thresholds
   ├─ provider-helper.ts           ← enhanceWithCI, StoredModels, legacy cache-first fetcher
   │
@@ -125,11 +125,11 @@ Adaptive Route A/B detection in `lib/registry.ts`: if ANY model has cost > 0, fr
 
 ### Coding Index (CI) Scores
 
-`provider-failover/benchmark-lookup.ts` appends `[CI: X.X]` via substring → alias → provider-normalization → prefix-fallback matching. Debug logging to `~/.pi/free.log` is opt-in (`PI_FREE_BENCHMARK_DEBUG=1`).
+`provider-failover/benchmark-lookup.ts` appends `[CI: X.X]` via substring → alias → provider-normalization → prefix-fallback matching. Debug logging to `free.log` is opt-in (`PI_FREE_BENCHMARK_DEBUG=1`).
 
 ### Config Resolution
 
-`config.ts` holds ALL configuration, **env var > `~/.pi/free.json`** (auto-created from `CONFIG_TEMPLATE`). Keys via `resolve(envKey, fileVal)`, booleans via `resolveBool`; `applyHidden(models, providerId)` filters `hidden_models` (supports `provider/model-id` scope).
+`config.ts` holds ALL configuration, **env var > `free.json` in the agent dir** (auto-created from `CONFIG_TEMPLATE`). Keys via `resolve(envKey, fileVal)`, booleans via `resolveBool`; `applyHidden(models, providerId)` filters `hidden_models` (supports `provider/model-id` scope).
 
 ### Toggle State
 
@@ -173,7 +173,7 @@ One rule (`resolveModelView` in `lib/registry.ts`): **explicit per-provider choi
 
 ## File Locations (User-Facing)
 
-- **Config:** `~/.pi/free.json` (auto-created) · **log:** `~/.pi/free.log` · **caches:** `~/.pi/provider-cache.json` (Ollama compat only), `~/.pi/agent/qoder-models-cache.json` (stream metadata), `~/.pi/agent/models-store.json` + `~/.pi/agent/auth.json` (Pi-owned native store/credentials). Auto-fallback blacklist is in-memory only.
+- **Data dir:** Pi's agent dir (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`, `PI_DATA_DIR` in `lib/paths.ts`) holds **config:** `free.json` (auto-created) · **log:** `free.log` · **caches:** `provider-cache.json` (Ollama compat only), `probe-cache.json`, `opencode-catalog-cache.json`, `free-telemetry.json`, `qoder-models-cache.json` (stream metadata), plus Pi-owned `models-store.json` and `auth.json`. Auto-fallback blacklist is in-memory only.
 
 ---
 
@@ -195,7 +195,7 @@ One rule (`resolveModelView` in `lib/registry.ts`): **explicit per-provider choi
 14. **Health output is credential-free** — counts/labels/paths only; never keys, tokens, payloads, or log contents.
 15. **Abort is cancellation, not failure** — every fetch `catch` guards `if (signal?.aborted)` and **returns the empty error-path value** before logging (`[]`, `{ all: [], free: [] }`, bare `return`). Check `signal?.aborted`, not `error.name`. One shared fetch/`catch` shape — sweep cross-cutting fixes repo-wide.
 16. **pi-ai compat must never load at startup** (~1.5s module-load cost) — dynamic imports only, via `loadPiAiEntry` (`lib/pi-ai-loader.ts`: bare specifier → on-disk fallbacks → vendored `dist/vendor` bundle as LAST resort, loaded on first use). Provider streams go through the lazy bridge (`lib/lazy-compat.ts`: sync compat-free shell, real stream piped in once compat resolves). Never add a static value-import of compat (type-only imports are fine); keep `scripts/check-runtime-imports.mjs` green. The vendored bundle excludes `registerApiProvider` (registry lives in the HOST's pi-ai — registering into a copy is a silent no-op) and `isRetryableAssistantError` (classifier uses local regexes). Fallback triggers on `ERR_MODULE_NOT_FOUND` **or** `ERR_PACKAGE_PATH_NOT_EXPORTED` for the allow-listed subpaths (a stale shadowing pi-ai copy, #581), and resolution is **entry-aware**: a candidate root must define the requested entry, so a copy whose `exports` predates it is skipped instead of shadowing a good copy further down. Full resolution order and Bun-binary rationale: HISTORY.md.
-17. **Wire-signature logs are header NAMES only — never values** (`lib/wire-signature.ts`, debug level). `headerNames` holds KEYS only; a token/value there leaks credentials into `~/.pi/free.log`. Same rule for any new header-touching observability; health output stays bodies/keys/tokens/tails-free (#437).
+17. **Wire-signature logs are header NAMES only — never values** (`lib/wire-signature.ts`, debug level). `headerNames` holds KEYS only; a token/value there leaks credentials into `free.log` in the shared agent dir. Same rule for any new header-touching observability; health output stays bodies/keys/tokens/tails-free (#437).
 18. **Live catalog audits gate each release and each new provider** — fetch every registered `/models` endpoint and verify free/paid classification before release notes (stored credential where available, anonymous where public). Dated counts go in `docs/catalog-audit.md` — a snapshot, never a guarantee; unauditable = "not audited"; never print keys. **`docs/free_models.md` must be regenerated from the same audit** — stale docs block the release; carry-over needs an explicit dated note in CHANGELOG + audit doc.
 19. **Detached log streams stay quiet after intentional teardown** — `attachLogStream` ignores errors from a stream that is no longer `logStream`; rotation and `flushLogsSync()` detach before ending/destroying, while errors from the active stream still enter the synchronous fallback.
 
@@ -253,7 +253,7 @@ Screen against these BEFORE writing code — each one cost a real incident:
 **Authentication notes:**
 
 - **Anonymous public catalogs** — Kilo, ZenMux, DeepInfra, Novita, Routeway, SambaNova, FastRouter, Cline resolve keyless (`public catalog (no account)`); chat still needs a key/login. StepFun, GMI Cloud, Agnes AI, TokenRouter, AnyAPI, B.AI, OpenGateway, Merge Gateway resolve `undefined` without a key (#421).
-- **Kilo/Cline** support OAuth (`/login`) and API keys (`KILO_API_KEY` / `CLINE_API_KEY` or `~/.pi/free.json`); stored credential wins, then ambient key. Cline's catalog refreshes without a credential.
+- **Kilo/Cline** support OAuth (`/login`) and API keys (`KILO_API_KEY` / `CLINE_API_KEY` or `free.json` in the agent dir); stored credential wins, then ambient key. Cline's catalog refreshes without a credential.
 - **Qoder**: OAuth/PAT, Pi-owned stores, COSY signing, custom stream. `/login qoder` or `QODER_PERSONAL_ACCESS_TOKEN` / `QODER_PAT`.
 - **OpenCode / OpenCode Go** are Pi-built-in; pi-free captures their catalogs for filtering, then runs one **detached** public-endpoint refresh per tier for models shipped between Pi releases. New IDs synthesize via `resolveOpenCodeModelApi`/`applyOpenCodeProtocolDefaults`. Failed/empty/aborted fetches retain cache and never rethrow. `resolveApiKey` omits absent credentials so logged-out providers read as unavailable, not refresh failures (defect shape 9; full #504 narrative in HISTORY.md). `opencode-free` inference sends Zen's anonymous `public` bearer (the keyed free-tier lane is rejected upstream with `Model access is disabled`) and activates `glob` + `grep` per turn so the request carries the tool names Zen's free-tier gate requires; `opencode-go` keeps the credential (`lib/glob-tool.ts`).
 - **Deferred saved-model restore** — Pi restores the session model before extension registrations flush, so resumes on toggle providers hit "Could not restore model". After capture, `built-in-toggle.ts` re-selects the persisted model via `pi.setModel` when in view; Pi's warning line is unavoidable.

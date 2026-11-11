@@ -592,7 +592,7 @@ export function registerLegacyProviderFromNative(
  *
  * Decision order (first match wins):
  *
- * 1. Explicit override — `oh_my_pi_compat` in `~/.pi/free.json` (or
+ * 1. Explicit override — `oh_my_pi_compat` in `~/.pi/agent/free.json` (or
  *    `OH_MY_PI_COMPAT=1`) forces the bridge, e.g. for OMP API drift or
  *    other legacy-only hosts.
  * 2. Native capability — a host exposing `registerNativeProvider` speaks

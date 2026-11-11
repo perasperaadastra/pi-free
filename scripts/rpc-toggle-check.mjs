@@ -78,7 +78,7 @@ function readOverride() {
 	try {
 		const homeDir = process.env.HOME || process.env.USERPROFILE || "";
 		const cfg = JSON.parse(
-			readFileSync(join(homeDir, ".pi", "free.json"), "utf8"),
+			readFileSync(join(homeDir, ".pi", "agent", "free.json"), "utf8"),
 		);
 		return cfg?.model_view_overrides?.[providerId];
 	} catch {

@@ -28,7 +28,7 @@
  * always resolves (empty auth when no key is configured), so the public free
  * catalog stays visible without an API key — the legacy registration skipped
  * the provider entirely in that case. Authenticated requests still use the
- * ambient `LLM7_API_KEY` env var / `~/.pi/free.json` value as before.
+ * ambient `LLM7_API_KEY` env var / `~/.pi/agent/free.json` value as before.
  *
  *   - The factory is synchronous and network-free — it builds the provider
  *     object and registers it. Models load via `refreshModels` (offline init
@@ -40,7 +40,7 @@
  *
  * Setup (optional — free models work without a key):
  *   1. Get a free token from https://token.llm7.io/
- *   2. Set LLM7_API_KEY env var (or add to ~/.pi/free.json)
+ *   2. Set LLM7_API_KEY env var (or add to ~/.pi/agent/free.json)
  *
  * Usage:
  *   pi install git:github.com/apmantza/pi-free

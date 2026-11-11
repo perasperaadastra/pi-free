@@ -21,7 +21,7 @@
  *
  * Setup:
  *   INFRON_API_KEY=sk-...
- *   # or add infron_api_key to ~/.pi/free.json
+ *   # or add infron_api_key to ~/.pi/agent/free.json
  *
  * Usage:
  *   pi install git:github.com/apmantza/pi-free

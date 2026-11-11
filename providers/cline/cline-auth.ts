@@ -611,7 +611,7 @@ export async function refreshClineCredential(
 
 /**
  * Resolve the effective Cline API key: a natively-stored key wins, then the
- * ambient `CLINE_API_KEY` env var / `~/.pi/free.json` value.
+ * ambient `CLINE_API_KEY` env var / `~/.pi/agent/free.json` value.
  *
  * Cline-specific deviation from the Kilo recipe: when NO key is configured this
  * still resolves — with an empty `auth` — instead of returning undefined. Cline's
@@ -672,7 +672,7 @@ export function readClineCliApiKey(
 
 /**
  * Resolve the effective Cline API key: a natively-stored key wins, then the
- * ambient `CLINE_API_KEY` env var / `~/.pi/free.json` value, then the Cline
+ * ambient `CLINE_API_KEY` env var / `~/.pi/agent/free.json` value, then the Cline
  * CLI's durable API key (`~/.cline/data/settings/providers.json`).
  */
 async function resolveClineApiKey(input: {

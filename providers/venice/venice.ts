@@ -21,7 +21,7 @@
  * Setup:
  *   1. Sign up at https://venice.ai/ and create an API key
  *      (https://venice.ai/settings/api)
- *   2. Set VENICE_API_KEY env var (or add venice_api_key to ~/.pi/free.json)
+ *   2. Set VENICE_API_KEY env var (or add venice_api_key to ~/.pi/agent/free.json)
  *
  * Usage:
  *   pi install git:github.com/apmantza/pi-free

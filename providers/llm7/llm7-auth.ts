@@ -13,7 +13,7 @@
  * resolving keeps the catalog flowing for everyone — Pi's sanctioned keyless
  * pattern (the pi-ai `faux` provider and pi-free's Cline port do the same) —
  * while authenticated requests still use the ambient `LLM7_API_KEY` env var /
- * `~/.pi/free.json` value exactly as the legacy registration did. There is
+ * `~/.pi/agent/free.json` value exactly as the legacy registration did. There is
  * intentionally no `apiKey.check`: Pi runs that check before availability
  * filtering and would hide this intentionally public catalog when the user is
  * logged out.
@@ -32,7 +32,7 @@ import { getLlm7ApiKey } from "../../config.ts";
 /**
  * Resolve the effective LLM7 API key: a natively-stored key (from
  * `interaction.prompt` login) wins, then the ambient `LLM7_API_KEY` env var /
- * `~/.pi/free.json` value via the shared config getter. When NO key is
+ * `~/.pi/agent/free.json` value via the shared config getter. When NO key is
  * configured this still resolves — with an empty `auth` — so Pi keeps the
  * public free catalog visible (see module docstring).
  */

@@ -7,7 +7,7 @@
  *
  * Setup:
  *   ANYAPI_API_KEY=...
- *   # or add anyapi_api_key to ~/.pi/free.json
+ *   # or add anyapi_api_key to ~/.pi/agent/free.json
  */
 
 import type {

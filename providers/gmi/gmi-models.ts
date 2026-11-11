@@ -33,7 +33,7 @@ import { fetchOpenAICompatibleModels } from "../../lib/util.ts";
  *
  * GMI publishes priced + promotional SKUs side-by-side; both are kept so
  * the free-only view and the "show paid" view each have the right entry
- * to display. Hidden models in `~/.pi/free.json` are still filtered.
+ * to display. Hidden models in `~/.pi/agent/free.json` are still filtered.
  */
 export async function fetchGmiModels(
 	apiKey: string,

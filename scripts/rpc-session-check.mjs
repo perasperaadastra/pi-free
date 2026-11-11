@@ -176,7 +176,10 @@ async function waitLoggedOutHidden(phase) {
  */
 function writeFreeJson(value) {
 	const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-	writeFileSync(join(homeDir, ".pi", "free.json"), JSON.stringify(value));
+	writeFileSync(
+		join(homeDir, ".pi", "agent", "free.json"),
+		JSON.stringify(value),
+	);
 }
 
 /**
@@ -187,7 +190,9 @@ function writeFreeJson(value) {
 function readSeededConfig() {
 	try {
 		const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-		return JSON.parse(readFileSync(join(homeDir, ".pi", "free.json"), "utf8"));
+		return JSON.parse(
+			readFileSync(join(homeDir, ".pi", "agent", "free.json"), "utf8"),
+		);
 	} catch {
 		return null;
 	}

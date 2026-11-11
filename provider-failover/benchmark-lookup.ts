@@ -71,13 +71,13 @@ function getBenchmarkIndex(): BenchmarkIndex {
 
 // Debug logging is opt-in because it emits one line per model per match
 // attempt (hundreds–thousands at startup). When enabled, entries flow through
-// the structured logger (namespace "benchmark-lookup") to ~/.pi/free.log via
+// the structured logger (namespace "benchmark-lookup") to ~/.pi/agent/free.log via
 // the buffered async stream — no per-model synchronous file writes.
 let debugEnabled = process.env.PI_FREE_BENCHMARK_DEBUG === "1";
 
 /**
  * Emit a structured debug line for a benchmark match attempt/match/miss.
- * Routed through the shared logger so it lands in ~/.pi/free.log under the
+ * Routed through the shared logger so it lands in ~/.pi/agent/free.log under the
  * "benchmark-lookup" namespace, using the buffered stream (no sync I/O).
  */
 function logDebug(entry: {

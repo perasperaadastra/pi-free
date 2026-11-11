@@ -9,7 +9,7 @@
  *
  * Setup:
  *   TOKENROUTER_API_KEY=sk-...
- *   # or add tokenrouter_api_key to ~/.pi/free.json
+ *   # or add tokenrouter_api_key to ~/.pi/agent/free.json
  *
  * Wire protocol: TokenRouter speaks vanilla OpenAI Chat Completions, so this
  * is a standard OpenAI-compatible native provider registered through the

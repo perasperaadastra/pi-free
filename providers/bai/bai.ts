@@ -19,7 +19,7 @@
  *
  * Setup:
  *   BAI_API_KEY=sk-...
- *   # or add bai_api_key to ~/.pi/free.json
+ *   # or add bai_api_key to ~/.pi/agent/free.json
  */
 
 import type {

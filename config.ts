@@ -55,7 +55,7 @@ import {
 // here keeps the import surface stable when constants move, and avoids forcing
 // every provider to add a second import line for `./constants.ts`. The cost
 // is that this file looks like a barrel — it isn't; it's the single source of
-// truth for runtime config (env vars, ~/.pi/free.json resolution, defaults)
+// truth for runtime config (env vars, ~/.pi/agent/free.json resolution, defaults)
 // and the provider-id constants happen to live alongside it.
 // Only CLINE and KILO are re-exported — they are the two ids consumed from
 // this module (kilo.ts, tests/config.test.ts); everything else imports from

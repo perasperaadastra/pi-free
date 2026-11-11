@@ -19,7 +19,7 @@
  * Setup:
  *   1. Sign up at https://cloud.sambanova.ai/
  *   2. Get API key from https://cloud.sambanova.ai/apis
- *   3. Set SAMBANOVA_API_KEY env var (or add to ~/.pi/free.json)
+ *   3. Set SAMBANOVA_API_KEY env var (or add to ~/.pi/agent/free.json)
  *
  * Usage:
  *   pi install git:github.com/apmantza/pi-free

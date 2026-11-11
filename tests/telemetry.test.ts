@@ -14,8 +14,9 @@ import type { PiAiResolutionSnapshot } from "../lib/pi-ai-loader.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "pi-free-telemetry-test-"));
 
-/** Where telemetry actually lands: PI_DATA_DIR is `<home>/.pi`. */
-const telemetryFile = () => join(tempDir, ".pi", "free-telemetry.json");
+/** Where telemetry actually lands: PI_DATA_DIR is `<home>/.pi/agent`. */
+const telemetryFile = () =>
+	join(tempDir, ".pi", "agent", "free-telemetry.json");
 
 function removeTelemetryFile(): void {
 	if (existsSync(telemetryFile())) unlinkSync(telemetryFile());
@@ -279,7 +280,7 @@ describe("telemetry", () => {
 			// The old-record parse proof: a v2.8.3 file has no `diagnostics` key,
 			// so the added field must be invisible to it in both directions — the
 			// reader must not crash and must not lose the model data it does have.
-			mkdirSync(join(tempDir, ".pi"), { recursive: true });
+			mkdirSync(join(tempDir, ".pi", "agent"), { recursive: true });
 			writeFileSync(
 				telemetryFile(),
 				JSON.stringify({

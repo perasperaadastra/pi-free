@@ -8,7 +8,7 @@
  * REDACTION RULE (durable convention): log header NAMES only — never values.
  * Cline's identity record carries `X-Task-ID`, and models can carry any
  * header a provider stamps, but an Authorization/apiKey/token VALUE in this
- * line would leak credentials into the shared ~/.pi/free.log (a plain-text
+ * line would leak credentials into the shared ~/.pi/agent/free.log (a plain-text
  * diagnostic file). If you extend this logger, never add a header value,
  * cookie, token, or any derived secret — names and shapes only.
  *

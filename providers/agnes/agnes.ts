@@ -19,7 +19,7 @@
  *
  * Setup:
  *   AGNES_API_KEY=...
- *   # or add agnes_api_key to ~/.pi/free.json
+ *   # or add agnes_api_key to ~/.pi/agent/free.json
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

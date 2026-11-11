@@ -26,9 +26,6 @@ function resolveHomeDir(): string {
 	return _nodeHomedir();
 }
 
-/** The user's pi data directory (~/.pi). */
-export const PI_DATA_DIR = join(resolveHomeDir(), ".pi");
-
 /**
  * Pi's agent directory (default: ~/.pi/agent).
  *
@@ -41,6 +38,14 @@ export function getPiAgentDir(): string {
 		process.env.PI_CODING_AGENT_DIR || join(resolveHomeDir(), ".pi", "agent")
 	);
 }
+
+/**
+ * The user's pi data directory — Pi's agent dir, so pi-free data (log,
+ * telemetry, caches) lives next to the config and Pi's own auth.json.
+ *
+ * Honors PI_CODING_AGENT_DIR; see getPiAgentDir().
+ */
+export const PI_DATA_DIR = getPiAgentDir();
 
 /** Maximum basename length for override env vars. */
 const MAX_BASENAME_LENGTH = 128;

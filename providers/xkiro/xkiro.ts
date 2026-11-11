@@ -19,7 +19,7 @@
  *
  * Setup:
  *   XKIRO_API_KEY=sk-xt-...
- *   # or add xkiro_api_key to ~/.pi/free.json
+ *   # or add xkiro_api_key to ~/.pi/agent/free.json
  */
 
 import type {

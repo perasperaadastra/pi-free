@@ -2,7 +2,7 @@
  * Model Telemetry — tracks real-world performance of free models.
  *
  * Hooks into Pi's turn_end event to capture token usage, latency, and
- * success/failure per model. Persists to ~/.pi/free-telemetry.json.
+ * success/failure per model. Persists to ~/.pi/agent/free-telemetry.json.
  *
  * Provides a real-world performance signal alongside static CI benchmarks.
  */

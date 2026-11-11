@@ -9,7 +9,7 @@
 
 import { createLogger } from "./logger.ts";
 
-// Kept as "util" so established `~/.pi/free.log` namespaces are unchanged.
+// Kept as "util" so established `~/.pi/agent/free.log` namespaces are unchanged.
 const _logger = createLogger("util");
 
 // =============================================================================

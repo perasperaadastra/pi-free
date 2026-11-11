@@ -41,7 +41,7 @@ Kilo supports free models and paid catalog entries. Authenticate with OAuth or a
 export KILO_API_KEY="..."
 ```
 
-Or set `kilo_api_key` in `~/.pi/free.json`. Kilo credentials are persisted by Pi in `~/.pi/agent/auth.json`. Use `/toggle-kilo` to change the visible catalog.
+Or set `kilo_api_key` in `~/.pi/agent/free.json`. Kilo credentials are persisted by Pi in `~/.pi/agent/auth.json`. Use `/toggle-kilo` to change the visible catalog.
 
 ### Cline
 
@@ -69,7 +69,7 @@ Ollama Cloud provides usage-based free access alongside other catalog entries. G
 export OLLAMA_API_KEY="..."
 ```
 
-Or set `ollama_api_key` in `~/.pi/free.json`. Use `/toggle-ollama-cloud`, `/probe-ollama`, and `/ollama-cloud-refresh`. Although Ollama is native, it retains `~/.pi/provider-cache.json` for `/api/show` capability reuse and the compatibility refresh command; Pi's native model store remains authoritative for native lifecycle initialization.
+Or set `ollama_api_key` in `~/.pi/agent/free.json`. Use `/toggle-ollama-cloud`, `/probe-ollama`, and `/ollama-cloud-refresh`. Although Ollama is native, it retains `~/.pi/agent/provider-cache.json` for `/api/show` capability reuse and the compatibility refresh command; Pi's native model store remains authoritative for native lifecycle initialization.
 
 ### AnyAPI
 
@@ -248,7 +248,7 @@ pi-free adds the `/toggle-openrouter` filter but does not own OpenRouter's crede
 
 ### OpenCode and OpenCode Go
 
-These are Pi-built-in providers wrapped by pi-free for filtering; Pi owns their credentials (`OPENCODE_API_KEY`, or `/login opencode-free`). After session start each tier performs one **detached** refresh against OpenCode's public, credential-free model endpoint — `GET https://opencode.ai/zen/v1/models` for `opencode-free` and `GET https://opencode.ai/zen/go/v1/models` for `opencode-go` — so models OpenCode ships between Pi releases appear without waiting for Pi's own catalog mirror. IDs already in Pi's built-in catalog keep Pi's curated metadata and wire protocol; newer IDs are synthesized with the OpenCode protocol defaults. The refresh never blocks startup, is deduplicated per process, and retains the cached catalog when the endpoint fails or returns nothing — the failure lands in `~/.pi/free.log` rather than surfacing as Pi's `Could not refresh …; showing cached models` warning. Known limitation: the refresh is anonymous by design (the Go catalog was identical anonymous vs. authenticated in a 2026-09-06 audit), so an account-scoped tier could list models the account cannot call; for `opencode-free` a stored credential would not change that, because free-tier inference is itself anonymous (see below).
+These are Pi-built-in providers wrapped by pi-free for filtering; Pi owns their credentials (`OPENCODE_API_KEY`, or `/login opencode-free`). After session start each tier performs one **detached** refresh against OpenCode's public, credential-free model endpoint — `GET https://opencode.ai/zen/v1/models` for `opencode-free` and `GET https://opencode.ai/zen/go/v1/models` for `opencode-go` — so models OpenCode ships between Pi releases appear without waiting for Pi's own catalog mirror. IDs already in Pi's built-in catalog keep Pi's curated metadata and wire protocol; newer IDs are synthesized with the OpenCode protocol defaults. The refresh never blocks startup, is deduplicated per process, and retains the cached catalog when the endpoint fails or returns nothing — the failure lands in `~/.pi/agent/free.log` rather than surfacing as Pi's `Could not refresh …; showing cached models` warning. Known limitation: the refresh is anonymous by design (the Go catalog was identical anonymous vs. authenticated in a 2026-09-06 audit), so an account-scoped tier could list models the account cannot call; for `opencode-free` a stored credential would not change that, because free-tier inference is itself anonymous (see below).
 
 **Free-tier inference.** `opencode-free` requests are sent with Zen's anonymous `public` bearer rather than the stored account credential: the account-keyed free-tier lane is rejected upstream (`403 Model access is disabled`) while the anonymous bearer is accepted, so attaching the key removes the only working path. `opencode-go` keeps its credential. Zen's free tier also fingerprints the request's tool list — it must carry the lowercase names `bash`, `edit`, `glob`, `grep`, `read` — so pi-free registers Pi's `find` tool under the name `glob` and adds `glob` + `grep` to the selected tools on `opencode-free` turns only. See [features](features.md#glob-tool-and-opencode-zen-free-tier-compatibility).
 
@@ -266,6 +266,6 @@ Pi owns the following providers; pi-free does not register duplicate catalogs or
 ## Storage summary
 
 - Native providers: `~/.pi/agent/models-store.json` and Pi's `~/.pi/agent/auth.json`.
-- Legacy catalog cache: `~/.pi/provider-cache.json`.
-- Ollama compatibility data: `~/.pi/provider-cache.json` in addition to the native store.
+- Legacy catalog cache: `~/.pi/agent/provider-cache.json`.
+- Ollama compatibility data: `~/.pi/agent/provider-cache.json` in addition to the native store.
 - Qoder's native static catalog is stored in Pi's model store; its optional stream metadata may use `~/.pi/agent/qoder-models-cache.json`.

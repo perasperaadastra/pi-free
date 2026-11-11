@@ -29,7 +29,7 @@ In [`constants.ts`](constants.ts), add the provider ID and base URL when appropr
 
 ### 2. Add configuration
 
-In [`config.ts`](config.ts), add the config field, template entry, API-key getter, and provider `show_paid` metadata. Keep environment variables ahead of `~/.pi/free.json`, and document unusual names such as `DEEPINFRA_TOKEN`.
+In [`config.ts`](config.ts), add the config field, template entry, API-key getter, and provider `show_paid` metadata. Keep environment variables ahead of `~/.pi/agent/free.json`, and document unusual names such as `DEEPINFRA_TOKEN`.
 
 Do not add keys for Pi-built-in providers. Pi owns those credentials.
 

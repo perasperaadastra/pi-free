@@ -17,7 +17,7 @@ All slash commands provided by pi-free.
 
 ## Per-Provider Toggles
 
-Run `/toggle-{provider}` to switch between a provider's free/basic view and its full catalog. The preference is saved in `~/.pi/free.json`.
+Run `/toggle-{provider}` to switch between a provider's free/basic view and its full catalog. The preference is saved in `free.json` in Pi's agent dir.
 
 | Command | Provider | Surface |
 | --- | --- | --- |
@@ -70,11 +70,11 @@ Qoder PAT authentication can also use `QODER_PERSONAL_ACCESS_TOKEN` or its `QODE
 | --- | --- |
 | `/ollama-cloud-refresh` | Re-fetch Ollama Cloud's catalog and update the provider live. Requires `OLLAMA_API_KEY`. |
 
-Ollama Cloud is a native provider, but this compatibility command and `/api/show` capability reuse continue to use `~/.pi/provider-cache.json`.
+Ollama Cloud is a native provider, but this compatibility command and `/api/show` capability reuse continue to use `provider-cache.json` in Pi's agent dir.
 
 ## Probe Commands
 
-Probes test model availability. Automatic checks use a 24-hour probe cache; running a probe command explicitly forces a fresh check. Broken models are hidden in `~/.pi/free.json` with provider-scoped IDs.
+Probes test model availability. Automatic checks use a 24-hour probe cache; running a probe command explicitly forces a fresh check. Broken models are hidden in `free.json` in Pi's agent dir with provider-scoped IDs.
 
 | Command | Provider | What it does |
 | --- | --- | --- |

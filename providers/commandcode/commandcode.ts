@@ -25,7 +25,7 @@
  *
  * Setup:
  *   COMMAND_CODE_API_KEY=user_...
- *   # or add commandcode_api_key to ~/.pi/free.json
+ *   # or add commandcode_api_key to ~/.pi/agent/free.json
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

@@ -730,7 +730,7 @@ export function logStartupSummary(): void {
 			},
 		);
 
-		// Per-provider debug detail (only written to ~/.pi/free.log by default).
+		// Per-provider debug detail (only written to ~/.pi/agent/free.log by default).
 		for (const p of s.providers) {
 			_logger.debug(`[pi-free] provider setup: ${p.provider}`, {
 				durationMs: p.durationMs,

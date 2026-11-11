@@ -7,7 +7,7 @@
  *
  * Setup:
  *   1. Get an API key from https://zenmux.ai
- *   2. Set ZENMUX_API_KEY or add zenmux_api_key to ~/.pi/free.json
+ *   2. Set ZENMUX_API_KEY or add zenmux_api_key to ~/.pi/agent/free.json
  */
 
 import type { Provider } from "@earendil-works/pi-ai/compat";

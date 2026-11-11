@@ -1,7 +1,7 @@
 /**
  * Typed configuration accessors for auto-fallback.
  *
- * Resolves the 9 optional `~/.pi/free.json` fields (Q12 = A) with the
+ * Resolves the 9 optional `~/.pi/agent/free.json` fields (Q12 = A) with the
  * repo-standard env > file precedence: every field also honors an env var
  * (`AUTO_FALLBACK`, `AUTO_FALLBACK_SCOPE`, `AUTO_FALLBACK_PROVIDERS`,
  * `AUTO_FALLBACK_BLACKLIST_TTL_MS`, `AUTO_FALLBACK_BLACKLIST_MAX`,

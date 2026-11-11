@@ -15,7 +15,7 @@ describe("resolveSafeDataFile", () => {
 		);
 	});
 
-	it("accepts a bare filename inside ~/.pi/", () => {
+	it("accepts a bare filename inside PI_DATA_DIR", () => {
 		const result = resolveSafeDataFile("test.log", PI_DATA_DIR, "free.log");
 		expect(result).toBe(join(PI_DATA_DIR, "test.log"));
 		expect(result.startsWith(PI_DATA_DIR + sep)).toBe(true);

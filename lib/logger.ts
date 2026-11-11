@@ -3,7 +3,7 @@
  * Replaces console.log statements with namespaced, level-based logging.
  *
  * File logging:
- * - Default file: ~/.pi/free.log
+ * - Default file: ~/.pi/agent/free.log
  * - Override filename: PI_FREE_LOG_PATH=custom-free.log
  * - Disable file logging: PI_FREE_FILE_LOG=false
  * - Rotate size: PI_FREE_LOG_MAX_BYTES=10485760 (default 10 MiB; 3 backups)
@@ -45,7 +45,7 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 };
 
 // Console default: error-only. Set LOG_LEVEL=debug or LOG_LEVEL=info to see more.
-// File default: debug (so we can inspect full behavior in ~/.pi/free.log).
+// File default: debug (so we can inspect full behavior in ~/.pi/agent/free.log).
 const VALID_LEVELS = new Set<LogLevel>(["debug", "info", "warn", "error"]);
 
 function parseLogLevel(

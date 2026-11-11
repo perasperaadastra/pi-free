@@ -11,7 +11,7 @@
  *
  * Setup:
  *   ROUTEWAY_API_KEY=sk-...
- *   # or add routeway_api_key to ~/.pi/free.json
+ *   # or add routeway_api_key to ~/.pi/agent/free.json
  */
 
 import type {

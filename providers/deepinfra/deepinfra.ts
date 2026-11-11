@@ -21,7 +21,7 @@
  * Setup:
  *   1. Sign up at https://deepinfra.com/ (GitHub or email)
  *   2. Get API key from https://deepinfra.com/dash/api_keys
- *   3. Set DEEPINFRA_TOKEN env var (or add to ~/.pi/free.json)
+ *   3. Set DEEPINFRA_TOKEN env var (or add to ~/.pi/agent/free.json)
  *
  * Usage:
  *   pi install git:github.com/apmantza/pi-free

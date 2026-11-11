@@ -13,7 +13,7 @@
  * Setup:
  *   1. Sign up at https://novita.ai
  *   2. Get API key from dashboard
- *   3. Set NOVITA_API_KEY env var or add to ~/.pi/free.json
+ *   3. Set NOVITA_API_KEY env var or add to ~/.pi/agent/free.json
  *
  * Usage:
  *   pi install git:github.com/apmantza/pi-free

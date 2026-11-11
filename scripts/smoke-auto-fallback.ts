@@ -35,7 +35,13 @@ import { join } from "node:path";
 const sandbox = mkdtempSync(join(tmpdir(), "pi-free-afb-smoke-"));
 process.env.HOME = sandbox;
 process.env.USERPROFILE = sandbox;
-process.env.PI_FREE_CONFIG_PATH = join(sandbox, "free.json");
+// Config and data land in the sandbox agent dir (<sandbox>/.pi/agent); the
+// file overrides below accept only a bare filename inside that directory.
+process.env.PI_FREE_CONFIG_FILE = "free.json";
+// pi-free derives its data dir from PI_CODING_AGENT_DIR when set; inheriting
+// the developer's value would write the log and caches into their real agent
+// dir instead of the sandbox.
+delete process.env.PI_CODING_AGENT_DIR;
 
 function fail(message: string): never {
 	console.error(`✗ ${message}`);
